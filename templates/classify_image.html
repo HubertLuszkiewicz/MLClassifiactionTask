@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Image for Classification</title>
+    <style>
+        /* Optional styling for better appearance */
+        body { font-family: sans-serif; margin: 20px; }
+        form { margin-top: 20px; border: 1px solid #ccc; padding: 20px; border-radius: 5px; }
+        label { display: block; margin-bottom: 10px; font-weight: bold; }
+        input[type="file"] { margin-bottom: 20px; }
+        button { padding: 10px 15px; margin-top: 5px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        #result { margin-top: 20px; padding: 15px; border: 1px solid #eee; background-color: #f9f9f9; }
+        /* Style for the image preview area */
+        #imagePreview {
+            margin-top: 15px;
+            border: 1px dashed #ccc;
+            padding: 10px;
+            display: none; /* Hide initially */
+            text-align: center; /* Center the image */
+        }
+        #imagePreview img {
+            max-width: 100%; /* Ensure image fits within the preview area */
+            height: auto;
+            display: block; /* Prevent extra space below image */
+            margin: 0 auto; /* Center the image */
+        }
+        img {
+            width: 300px;
+            height: 300px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Image Classification</h1>
+    <p>Upload an image to get its classification.</p>
+
+    <form id="uploadForm" action="{{ url_for('classify_image') }}" method="post" enctype="multipart/form-data">
+        <label for="imageFile">Select Image:</label>
+        <input type="file" id="imageFile" name="image" accept="image/*">
+
+        <!-- Area where the selected image will be displayed -->
+        <div id="imagePreview">
+            <p>Image Preview:</p>
+            <img id="previewImage" src="#" alt="Image Preview">
+        </div>
+
+        <button type="submit">Classify Image</button>
+    </form>
+
+    <div id="result" style="display: none;">
+        <h2>Classification Result:</h2>
+        <pre id="resultJson"></pre>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const imageFile = document.getElementById('imageFile'); // Get the file input element
+        const imagePreviewDiv = document.getElementById('imagePreview'); // Get the preview div
+        const previewImage = document.getElementById('previewImage'); // Get the img tag for preview
+        const resultDiv = document.getElementById('result');
+        const resultJsonPre = document.getElementById('resultJson');
+
+        // --- Add an event listener to the file input ---
+        imageFile.addEventListener('change', function() {
+            const file = this.files[0]; // Get the first selected file
+
+            if (file) {
+                const reader = new FileReader(); // Create a FileReader object
+
+                reader.onload = function(e) {
+                    // When the file is read successfully, the result (data URL) is in e.target.result
+                    previewImage.src = e.target.result; // Set the src of the img tag to the data URL
+                    imagePreviewDiv.style.display = 'block'; // Show the preview area
+                }
+
+                // Read the file as a Data URL (base64 encoded string)
+                reader.readAsDataURL(file);
+
+            } else {
+                // If no file is selected, hide the preview
+                previewImage.src = "#";
+                imagePreviewDiv.style.display = 'none';
+            }
+        });
+
+        // --- Existing form submission logic (unchanged) ---
+        form.addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const formData = new FormData(form);
+
+            try {
+                const response = await fetch('/classify', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorData.error || response.statusText}`);
+                }
+
+                const result = await response.json();
+
+                resultJsonPre.textContent = JSON.stringify(result, null, 2);
+                resultDiv.style.display = 'block';
+
+            } catch (error) {
+                console.error('Error:', error);
+                resultJsonPre.textContent = `Error: ${error.message}`;
+                resultDiv.style.display = 'block';
+            }
+        });
+    </script>
+
+</body>
+</html>
