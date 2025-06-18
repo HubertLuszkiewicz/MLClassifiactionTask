@@ -82,10 +82,7 @@ def show_evaluation_page():
 
 @app.route('/evaluate', methods=["POST"])
 def evaluate_model():
-    # Initialize temporary directory variable outside the try block
-    temp_dir = None
-
-    # Initialize metrics dictionary to return
+    temp_dir = None # Initialize temporary directory variable
     evaluation_metrics = {"status": "processing"}
 
     try:
@@ -104,22 +101,41 @@ def evaluate_model():
             print(f"Saving {len(test_files)} test files to temporary directory: {temp_dir}") # Debug print
 
             for file_storage in test_files:
-                # Recreate the subdirectory structure from the filename inside the temporary directory
+                # file_storage.filename contains the relative path (e.g., 'mini_dataset/person/image.jpg')
                 save_path = os.path.join(temp_dir, file_storage.filename)
-                # Ensure the subdirectory for this file exists
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                # Save the file
                 file_storage.save(save_path)
 
             print("Finished saving test files.") # Debug print
 
         except Exception as e:
             print(f"Error during file reception or saving: {e}")
-            # Return a specific error response if saving fails
-            return jsonify({"error": f"Error receiving or saving test files: {e}"}), 500 # Use 500 as it's a server-side issue
+            return jsonify({"error": f"Error receiving or saving test files: {e}"}), 500
 
 
-        # 2. Load Model
+        # --- MODIFICATION START ---
+        # 2. Find the root directory within the temporary directory (e.g., 'mini_dataset')
+        dataset_root_in_temp = None
+        try:
+            items_in_temp_dir = os.listdir(temp_dir)
+            # Expect exactly one item, which is the folder the user uploaded
+            if len(items_in_temp_dir) == 1 and os.path.isdir(os.path.join(temp_dir, items_in_temp_dir[0])):
+                 dataset_root_name = items_in_temp_dir[0]
+                 dataset_root_in_temp = os.path.join(temp_dir, dataset_root_name)
+                 print(f"Identified dataset root folder inside temp dir: {dataset_root_in_temp}") # Debug print
+            else:
+                 # This happens if the user uploaded individual files or multiple items
+                 print(f"Error: Unexpected structure inside temp directory. Expected a single root folder.") # Debug print
+                 print(f"Contents: {items_in_temp_dir}") # Debug print
+                 return jsonify({"error": "Uploaded test data has an unexpected structure. Please upload a single root folder containing class subfolders."}), 400 # Use 400 for bad client data
+
+        except Exception as e:
+            print(f"Error identifying dataset root folder in temp dir: {e}")
+            return jsonify({"error": f"Server error processing uploaded folder structure: {e}"}), 500
+        # --- MODIFICATION END ---
+
+
+        # 3. Load Model
         print("Attempting to load model...") # Debug print
         try:
             selected_model_path = request.form.get('modelPath')
@@ -127,157 +143,159 @@ def evaluate_model():
                 print("Error: No model path selected.") # Debug print
                 return jsonify({"error": "No model path selected."}), 400
 
-            # IMPORTANT SECURITY/VALIDATION: Check if the model path is safe!
             abs_model_save_dir = os.path.abspath(MODEL_SAVE_DIR)
             abs_selected_model_path = os.path.abspath(selected_model_path)
 
             if not abs_selected_model_path.startswith(abs_model_save_dir):
                  print(f"SECURITY ALERT: Attempted to load model outside MODEL_SAVE_DIR: {selected_model_path}")
-                 return jsonify({"error": "Invalid model path specified."}), 400 # Use 400 for bad client input
+                 return jsonify({"error": "Invalid model path specified."}), 400
 
             if not os.path.exists(abs_selected_model_path):
-                print(f"Model file not found: {selected_model_path}") # Debug print
-                return jsonify({"error": f"Model file not found at server path: {selected_model_path}"}), 404 # Use 404 if resource not found
+                print(f"Model file not found: {selected_model_path}")
+                return jsonify({"error": f"Model file not found at server path: {selected_model_path}"}), 404
 
-            # Use your load_model_from_file function
-            model = load_model_from_file(abs_selected_model_path) # Assuming this function handles its own basic printing
+            model = load_model_from_file(abs_selected_model_path)
             if model is None:
-                 # load_model_from_file should print details about the load failure
-                 return jsonify({"error": f"Failed to load model from {selected_model_path}. Check server logs for details."}), 500 # Use 500 for server error
+                 return jsonify({"error": f"Failed to load model from {selected_model_path}. Check server logs for details."}), 500
 
             print("Model loaded successfully.") # Debug print
+
         except Exception as e: # Catch any unexpected errors during model loading
              print(f"Unexpected error during model loading: {e}")
              return jsonify({"error": f"Unexpected error during model loading: {e}"}), 500
 
 
-        # 3. Load Class Names Mapping (SKIP - using folder names)
-        # If you were loading from JSON, this would be its own try/except block
-
-        # 4. Create Test Dataset from the temporary directory
+        # 4. Create Test Dataset from the identified dataset root within the temporary directory
         print("Attempting to create test dataset...") # Debug print
         try:
-            # image_dataset_from_directory infers class names from folder names
+            # MODIFICATION: Point image_dataset_from_directory to the *subfolder*
             test_ds = image_dataset_from_directory(
-                temp_dir, # Point to the temporary directory where files were saved
-                labels='inferred', # Inferred from subfolder names (e.g., 'person', 'motorbike')
+                dataset_root_in_temp, # MODIFIED: Use the identified root folder path
+                labels='inferred', # Inferred from subfolder names (e.g., 'person', 'motorbike' inside mini_dataset)
                 label_mode='categorical', # Or 'int', MUST MATCH how the model was trained!
                 image_size=(224, 224), # MUST match model's expected input size (adjust if needed)
                 batch_size=32, # Batch size for evaluation
                 shuffle=False # Don't shuffle test data for consistent evaluation
             )
 
-            # Check if any classes were inferred. This can fail if the temp_dir
+            # Check if any classes were inferred. This can fail if dataset_root_in_temp
             # doesn't contain class subdirectories with images.
             if not test_ds.class_names:
                  print("Error: No classes inferred from test data folders.") # Debug print
-                 return jsonify({"error": "No valid image files found in class subfolders within the uploaded test data. Ensure structure is class_name/image.jpg"}), 400 # Use 400 for bad client data
+                 return jsonify({"error": "No valid image files found in class subfolders within the uploaded test data. Ensure structure is class_name/image.jpg"}), 400
 
-             # Get the class names *inferred from the test data folders*
             test_dataset_class_names = test_ds.class_names
             print(f"Test dataset inferred classes: {test_dataset_class_names}") # Debug print
             print(f"Inferred {len(test_dataset_class_names)} classes.") # Debug print
 
+            # --- You might want to add a check here to see if the number of inferred classes
+            # matches the number of classes the model was trained on. This requires knowing
+            # how many classes the loaded model expects (e.g., from loaded class_names.json
+            # IF you were using it, or perhaps an attribute saved with the model).
+            # If your model has 8 classes, you expect len(test_dataset_class_names) == 8.
+            # if len(test_dataset_class_names) != 8: # Replace 8 with your actual number of classes
+            #      print(f"Warning: Inferred {len(test_dataset_class_names)} classes, but model expects 8.")
+                 # Decide if this is a fatal error or just a warning
+
             # Apply the same preprocessing used during training
-            # Make sure preprocess_input matches the model architecture (ResNet50)
             test_ds = test_ds.map(lambda x, y: (preprocess_input(x), y), num_parallel_calls=tf.data.AUTOTUNE)
             # Optimize data loading
             test_ds = test_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
 
             print(f"Created test dataset with {len(test_ds)} batches.") # Debug print
-            # print(f"Total images in test dataset: {test_ds.cardinality().numpy() * test_ds.element_spec[0].shape[0]}") # Debug print - requires iterating over dataset first, can be slow
-
 
         except Exception as e:
-            print(f"Error creating test dataset from {temp_dir}: {e}")
-            # This could happen due to incorrect folder structure, corrupt images, etc.
-            return jsonify({"error": f"Error creating test dataset from uploaded files: {e}"}), 400 # Use 400 for client data issue
+            print(f"Error creating test dataset from {dataset_root_in_temp}: {e}")
+            return jsonify({"error": f"Error creating test dataset from uploaded files. Ensure structure is class_name/image.jpg: {e}"}), 400
 
 
         # 5. Evaluate the Model and Calculate Metrics
         print("Attempting to evaluate model and calculate metrics...") # Debug print
         try:
             print("Starting core model evaluation (loss, accuracy)...") # Debug print
-            # Evaluate returns loss and metrics defined in model.compile
-            results_from_evaluate = model.evaluate(test_ds, verbose=0) # verbose=0 prevents progress bar clutter in logs
+
+            # ADD THIS COMPILATION STEP (if you used compile=False in load_model)
+            try:
+                model.compile(
+                    optimizer=Adam(), # Optimizer is required but state not used by evaluate
+                    loss=CategoricalCrossentropy(), # Or 'categorical_crossentropy' string, must match training
+                    metrics=['accuracy'] # Or other metrics
+                )
+                print("Model compiled for evaluation.") # Debug print
+            except Exception as e:
+                 print(f"Error compiling model for evaluation: {e}")
+                 # Decide if this is a fatal error - usually it is if evaluate() is needed
+                 return jsonify({"error": f"Error compiling model for evaluation: {e}"}), 500
+            # END COMPILATION STEP
+
+
+            results_from_evaluate = model.evaluate(test_ds, verbose=0)
             print("Model evaluation finished.") # Debug print
 
-            # Ensure results_from_evaluate is a list
             if not isinstance(results_from_evaluate, list):
                  results_from_evaluate = [results_from_evaluate]
 
-            # Combine metric names and results into the dictionary
             evaluation_metrics['core_metrics'] = dict(zip(model.metrics_names, results_from_evaluate))
-            print("Core evaluation metrics:", evaluation_metrics['core_metrics']) # Debug print
+            print("Core evaluation metrics:", evaluation_metrics['core_metrics'])
 
 
             # --- Calculate detailed metrics (Precision, Recall, F1, Confusion Matrix) ---
             print("Calculating detailed metrics...") # Debug print
-            # Ensure this only runs if you want detailed metrics and scikit-learn is installed
-            # You might want to wrap this section in a check if scikit-learn imports succeeded
 
-            # Get true labels (integer indices). Convert from one-hot if necessary.
             all_labels = []
-            for images, labels in test_ds: # Iterate to get true labels
+            for images, labels in test_ds:
                 all_labels.append(labels.numpy())
             true_labels_int = np.concatenate(all_labels, axis=0)
-            # Convert one-hot true labels to integer indices if label_mode='categorical'
+
             if test_ds.element_spec[1].shape[-1] > 1 and true_labels_int.ndim > 1:
                  true_labels_int = np.argmax(true_labels_int, axis=1)
 
 
-            # Get predictions (raw output, e.g., probabilities from softmax)
             print("Getting model predictions for detailed metrics...") # Debug print
-            predictions_raw = model.predict(test_ds) # Predict on the whole dataset
-            print("Predictions obtained.") # Debug print
+            predictions_raw = model.predict(test_ds)
+            print("Predictions obtained.")
 
-
-            # Convert predictions to integer indices (e.g., using argmax for softmax output)
             predicted_labels_int = np.argmax(predictions_raw, axis=1)
 
-            # Use the class names inferred from the test dataset for metrics reporting
-            sorted_class_labels = test_ds.class_names # These are sorted alphabetically by default
+            sorted_class_labels = test_ds.class_names # Use inferred names
 
             # Calculate Classification Report
-            # zero_division=0 handles potential cases with no true/predicted samples for a class
             report = classification_report(true_labels_int, predicted_labels_int, target_names=sorted_class_labels, output_dict=True, zero_division=0)
             evaluation_metrics['classification_report'] = report
-            print("Classification report calculated.") # Debug print
+            print("Classification report calculated.")
 
             # Calculate Confusion Matrix
             cm = confusion_matrix(true_labels_int, predicted_labels_int)
-            evaluation_metrics['confusion_matrix'] = cm.tolist() # Convert numpy array to list
-            evaluation_metrics['confusion_matrix_labels'] = sorted_class_labels # Add class order
-            print("Confusion matrix calculated.") # Debug print
+            evaluation_metrics['confusion_matrix'] = cm.tolist()
+            evaluation_metrics['confusion_matrix_labels'] = sorted_class_labels
+            print("Confusion matrix calculated.")
 
-            # Add the class names inferred from the test data folders
             evaluation_metrics['inferred_class_names'] = sorted_class_labels
 
-            evaluation_metrics['status'] = 'success' # Update overall status
-
+            evaluation_metrics['status'] = 'success'
 
             # 6. Return results as JSON
-            print("Returning evaluation metrics as JSON.") # Debug print
+            print("Returning evaluation metrics as JSON.")
             return jsonify(evaluation_metrics)
 
         except Exception as e:
             print(f"Error during model evaluation or metric calculation: {e}")
-            # This could be TensorFlow execution error, scikit-learn error, etc.
-            return jsonify({"error": f"Error during model evaluation or metric calculation: {e}"}), 500 # Use 500
+            return jsonify({"error": f"Error during model evaluation or metric calculation: {e}"}), 500
 
 
     except Exception as e:
-        # This catches errors that might happen *very* early, before specific blocks
-        print(f"An unexpected error occurred before specific evaluation steps: {e}") # Debug print
-        return jsonify({"error": f"An unexpected server error occurred: {e}"}), 500 # Use 500
+        # Catches errors before specific blocks (e.g., tempfile.mkdtemp, finding root folder)
+        print(f"An unexpected error occurred during initial processing: {e}")
+        return jsonify({"error": f"An unexpected server error occurred during initial processing: {e}"}), 500
+
 
     finally:
         # 7. Clean up the temporary directory
         if temp_dir and os.path.exists(temp_dir):
             try:
-                print(f"Cleaning up temporary directory: {temp_dir}") # Debug print
+                print(f"Cleaning up temporary directory: {temp_dir}")
                 shutil.rmtree(temp_dir)
-                print("Cleanup complete.") # Debug print
+                print("Cleanup complete.")
             except Exception as e:
                 print(f"Error cleaning up temporary directory {temp_dir}: {e}")
                 # Log this, but don't block the response.
