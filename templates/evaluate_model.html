@@ -54,6 +54,7 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 1rem;
+            display: block;
         }
 
         button:hover {
@@ -129,6 +130,9 @@
         <!-- Test Data Folder Input -->
         <label for="testDataFolder">Select Test Data Folder:</label>
         <input type="file" id="testDataFolder" name="testData" webkitdirectory directory accept="image/*" required>
+
+        <label for="labels">Select labels for Test Data:</label>
+        <input type="file" id="labels" name="labels" accept=".csv" required>
 
         <button type="submit">Evaluate Model</button>
     </form>
