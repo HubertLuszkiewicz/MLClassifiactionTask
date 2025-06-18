@@ -27,7 +27,7 @@ def train_model():
         "training_file_count": len(training_files)
     })
 
-@app.rout('/evaluate', methods=["GET"])
+@app.route('/evaluate', methods=["GET"])
 def show_evaluation_page():
     return render_template('evaluate_model.html')
 
