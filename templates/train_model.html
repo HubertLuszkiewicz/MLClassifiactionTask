@@ -92,24 +92,27 @@
 <body>
 
     <h1>Upload Data for Model Training</h1>
-    <p>Please upload your training dataset</p>
+    <p>Please upload your training dataset folder containing class subfolders.</p>
 
-    <form id="trainingForm" action="/start_training" method="post" enctype="multipart/form-data">
-        <!-- Training Data Input -->
-        <label for="trainingDataFile">Select Training Data:</label>
-        <!-- Consider adding 'accept' attribute if you expect specific file types -->
-        <input type="file" id="trainingDataFile" name="trainingData" webkitdirectory directory accept="image/*" required>
-        
+    <form id="trainingForm" action="/train" method="post" enctype="multipart/form-data">
+        <!-- Training Data Input (Folder) -->
+        <label for="trainingDataFolder">Select Training Data Folder:</label>
+        <input type="file" id="trainingDataFolder" name="trainingData" webkitdirectory directory accept="image/*" required>
+
+        <!-- REMOVED: Input for Labels CSV -->
+        <!--
         <label for="labels">Select labels for Training Data:</label>
         <input type="file" id="labels" name="labels" accept=".csv" required>
+        -->
 
+        <!-- REMOVED: Input for Model Selection -->
+        <!--
         <label for="modelSelect">Select Model to Train:</label>
         <select id="modelSelect" name="modelPath" required>
-            <!-- Opcje będą dynamicznie dodane przez backend -->
             <option value="">-- Loading models... --</option>
-            <!-- Przykładowa opcja (usunięta/zastąpiona przez backend) -->
-            <!-- <option value="path/to/your/model.h5">My Trained Model v1</option> -->
         </select>
+        -->
+
         <button type="submit">Start Training</button>
     </form>
 
@@ -120,131 +123,97 @@
     </div>
 
     <script>
-        // Basic JavaScript to handle form submission and show/update the status area.
-        // A real application would use fetch/XMLHttpRequest to send data
-        // and likely update the status area with real-time logs via WebSockets
-        // or polling.
+        // Basic JavaScript for form submission and status display.
 
         const trainingForm = document.getElementById('trainingForm');
         const trainingStatusDiv = document.getElementById('trainingStatus');
         const statusText = document.getElementById('statusText');
         const logOutput = document.getElementById('logOutput');
-        const modelSelect = document.getElementById('modelSelect');
-
-        // --- Function to fetch and populate model list ---
-        async function fetchModels() {
-            try {
-                // Make a GET request to a backend endpoint that lists models
-                const response = await fetch('/list_models'); // <--- You need to create this endpoint in Flask!
-
-                if (!response.ok) {
-                    const errorBody = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
-                    throw new Error(`HTTP error! status: ${response.status} - ${errorBody.error || response.statusText}`);
-                }
-
-                const models = await response.json(); // Assume backend returns JSON like ["model1.h5", "model2.h5"]
-
-                // Clear current options
-                modelSelect.innerHTML = '';
-
-                if (models.length === 0) {
-                    modelSelect.innerHTML = '<option value="">-- No models found --</option>';
-                    modelSelect.disabled = true; // Disable if no models
-                     // Also disable the submit button if no models
-                     form.querySelector('button[type="submit"]').disabled = true;
-
-                } else {
-                     // Add a default option
-                     const defaultOption = document.createElement('option');
-                     defaultOption.value = "";
-                     defaultOption.textContent = "-- Select a model --";
-                     modelSelect.appendChild(defaultOption);
+        // const modelSelect = document.getElementById('modelSelect'); // Removed
 
 
-                    // Add options for each model received
-                    models.forEach(model => {
-                        const option = document.createElement('option');
-                        // The 'value' should be what your backend needs to load the model
-                        // This could be the full path, a relative path, or just an ID
-                        option.value = model.path; // Assuming backend provides 'path' and 'name'
-                        option.textContent = model.name; // Assuming backend provides a 'name' for display
-                        modelSelect.appendChild(option);
-                    });
-                    modelSelect.disabled = false; // Enable the select dropdown
-                    trainingForm.querySelector('button[type="submit"]').disabled = false; // Enable submit button
-                }
+        // --- REMOVED: Function to fetch and populate model list ---
+        // async function fetchModels() { ... }
+        // REMOVED: fetchModels() call on page load
 
-            } catch (error) {
-                console.error('Error fetching models:', error);
-                modelSelect.innerHTML = '<option value="">-- Error loading models --</option>';
-                modelSelect.disabled = true; // Disable on error
-                 form.querySelector('button[type="submit"]').disabled = true; // Disable submit button
-            }
-        }
+        // --- Event Listeners ---
+        // Optional: Clear results when training data folder changes
+        const trainingDataFolderInput = document.getElementById('trainingDataFolder');
+        trainingDataFolderInput.addEventListener('change', function() {
+            trainingStatusDiv.style.display = 'none';
+            statusText.textContent = 'Waiting for training to start...';
+            logOutput.textContent = 'Log output will appear here.';
+        });
 
-        // Fetch models when the page loads
-        fetchModels();
 
-        trainingForm.addEventListener('submit', function(event) {
+        // --- Form Submission Logic ---
+        trainingForm.addEventListener('submit', async function(event) {
             event.preventDefault(); // Prevent the default form submission
 
-            const formData = new FormData(trainingForm); // Get form data, including files
+            // Get files from input
+             const trainingFiles = trainingDataFolderInput.files;
+             if (trainingFiles.length === 0) {
+                 alert("Please select a training data folder.");
+                 return; // Stop the submission
+             }
 
             // For demonstration: Show the status area and update text
             trainingStatusDiv.style.display = 'block';
             statusText.textContent = 'Uploading data and initiating training...';
             logOutput.textContent = 'Sending files to server...';
 
-            // --- Placeholder for actual API call and status updates ---
-            // Example using fetch API:
-            // fetch('/start_training', { // Or your specific backend endpoint
-            //     method: 'POST',
-            //     body: formData // FormData handles file uploads
-            // })
-            // .then(response => {
-            //     if (!response.ok) {
-            //         // Attempt to read error message from body if available
-            //         return response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
-            //     }
-            //     // Assuming backend returns JSON status/logs
-            //     return response.json();
-            // })
-            // .then(data => {
-            //     if (data.error) {
-            //         statusText.textContent = 'Error starting training.';
-            //         logOutput.textContent = `Server responded with error: ${data.error}`;
-            //         console.error('Server Error:', data.error);
-            //     } else {
-            //          // Update status and logs based on backend response
-            //          statusText.textContent = data.status || 'Training started successfully.';
-            //          logOutput.textContent = data.message || 'Training process initiated.';
-            //          // You might need a separate mechanism (like polling or WebSockets)
-            //          // to continuously fetch logs/progress updates during training.
-            //     }
-            // })
-            // .catch(error => {
-            //     statusText.textContent = 'Error during fetch request.';
-            //     logOutput.textContent = `Failed to send data or receive response: ${error}`;
-            //     console.error('Fetch Error:', error);
-            // });
-            // --- End Placeholder ---
+            const formData = new FormData(trainingForm); // Get form data, includes the folder files
 
-            // Simulate a training process update for demonstration
-             setTimeout(() => {
-                 statusText.textContent = 'Training running... (Simulated)';
-                 logOutput.textContent += '\nData received. Preprocessing...';
-             }, 1500);
-             setTimeout(() => {
-                 logOutput.textContent += '\nPreprocessing complete. Starting model training...';
-             }, 3000);
-             setTimeout(() => {
-                 logOutput.textContent += '\nEpoch 1/5 - Loss: 0.8, Accuracy: 0.6';
-             }, 5000);
-              setTimeout(() => {
-                 logOutput.textContent += '\nEpoch 5/5 - Loss: 0.1, Accuracy: 0.95 - Training Complete!';
-                 statusText.textContent = 'Training Completed Successfully (Simulated)';
-             }, 8000);
 
+            try {
+                // Send the form data to the backend endpoint
+                const response = await fetch('/train', { // Ensure this URL is correct
+                    method: 'POST',
+                    body: formData // FormData handles file uploads
+                });
+
+                 // Assuming backend returns JSON status/logs
+                const result = await response.json(); // Attempt to parse JSON even on non-OK response
+
+                // Hide loading indicator (if you add one to this page)
+                // loadingIndicator.style.display = 'none';
+
+                // Check if the response is OK (status code 2xx)
+                if (!response.ok) {
+                    // If response is not OK, treat the JSON body as an error message
+                    const errorMsg = result.error || `HTTP error! status: ${response.status} - ${response.statusText}`;
+                    throw new Error(errorMsg);
+                }
+
+
+                // --- Update status and logs based on backend response ---
+                // Assuming backend returns { status: 'success', message: '...', saved_model_path: '...', ... } on success
+                statusText.textContent = result.status || 'Training process updated.'; // Use status from backend
+                logOutput.textContent = result.message || 'Training started successfully.'; // Use message from backend
+
+                // If backend sends continuous updates (requires WebSockets or polling),
+                // you'd need more complex JS here to append logs.
+                // For a single JSON response at the end, just displaying the message is fine.
+
+                // Example: Append saved paths on success
+                 if (result.saved_model_path) {
+                     logOutput.textContent += `\nSaved model to: ${result.saved_model_path}`;
+                 }
+                  if (result.saved_class_names_path) {
+                     logOutput.textContent += `\nSaved class names to: ${result.saved_class_names_path}`;
+                 }
+
+
+            } catch (error) {
+                console.error('Error during fetch request or backend processing:', error);
+                // Hide loading indicator (if you add one to this page)
+                // loadingIndicator.style.display = 'none';
+
+                // Display the error message received from the backend or the fetch error
+                statusText.textContent = 'Training failed.';
+                logOutput.textContent = `Error: ${error.message}`;
+            }
+             // No need for simulated updates now if backend returns final status
 
         });
     </script>
