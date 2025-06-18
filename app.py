@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify, render_template
 import os
-from functions.resnet import save_resnet50, load_resnet50
 import tensorflow as tf
 import numpy as np
 
@@ -11,8 +10,43 @@ from tensorflow.keras.applications.resnet50 import preprocess_input, decode_pred
 from tensorflow.keras.preprocessing import image_dataset_from_directory
 from tensorflow.keras.applications.resnet50 import preprocess_input
 
-save_resnet50()
-RESNET_MODEL_FILENAME = "resnet.h5"
+from tensorflow.keras.models import load_model
+
+def load_model_from_file(model_path):
+    """
+    Loads a Keras model from the specified file path.
+
+    Args:
+        model_path (str): The path to the saved model file (.h5, .keras)
+                          or the directory (SavedModel format).
+
+    Returns:
+        tf.keras.Model or None: The loaded model object, or None if loading failed.
+    """
+    print(f"Attempting to load model from: {model_path}")
+    if not os.path.exists(model_path): # os needs to be imported
+        print(f"Error: Model file/directory not found at {model_path}")
+        return None
+
+    try:
+        # Use tf.keras.models.load_model
+        # compile=False is often useful if you only need inference/evaluation
+        # and don't need the original optimizer or loss function setup.
+        # custom_objects is needed if your model architecture includes custom layers
+        # that are not built-in Keras layers.
+        # model = load_model(model_path, compile=False, custom_objects={'YourCustomLayer': YourCustomLayer})
+
+        # For a standard ResNet50 without custom layers, compile=False is sufficient
+        model = load_model(model_path, compile=False)
+
+        print("Model loaded successfully.")
+        return model
+
+    except Exception as e:
+        print(f"Error loading model from {model_path}: {e}")
+        # This could happen due to file corruption, incompatibility, missing custom objects, etc.
+        return None
+    
 
 app = Flask(__name__)
 MODEL_SAVE_DIR = 'trained_models'
@@ -58,7 +92,7 @@ def evaluate_model():
 
     # Load model
     selected_model_path = request.form.get('modelPath')
-    model = load_resnet50(selected_model_path)
+    model = load_model_from_file(selected_model_path)
 
     test_ds = image_dataset_from_directory(
         TEST_DIR, # Point to the temporary directory where files were saved
