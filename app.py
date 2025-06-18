@@ -90,68 +90,73 @@ def evaluate_model():
 
     try:
         print("--- Received POST request to /evaluate ---") # Debug print
-        print("Attempting to receive test data files...") # Debug print
 
         # 1. Receive and Save Test Images into a Temporary Directory
-        test_files = request.files.getlist('testData')
-        if not test_files:
-            return jsonify({"error": "No test data files received."}), 400
+        print("Attempting to receive and save test data files...") # Debug print
+        try:
+            test_files = request.files.getlist('testData')
+            if not test_files:
+                print("Error: No test data files received.") # Debug print
+                return jsonify({"error": "No test data files received."}), 400
 
-        # Create a temporary directory unique to this request
-        temp_dir = tempfile.mkdtemp(prefix='test_eval_')
-        print(f"Saving {len(test_files)} test files to temporary directory: {temp_dir}")
+            # Create a temporary directory unique to this request
+            temp_dir = tempfile.mkdtemp(prefix='test_eval_')
+            print(f"Saving {len(test_files)} test files to temporary directory: {temp_dir}") # Debug print
 
-        for file_storage in test_files:
-            # Recreate the subdirectory structure from the filename inside the temporary directory
-            # Use file_storage.filename directly as it contains the relative path from the upload
-            # IMPORTANT: sanitize filename if you don't fully trust the source,
-            # but image_dataset_from_directory needs the path structure.
-            save_path = os.path.join(temp_dir, file_storage.filename)
-            # Ensure the subdirectory for this file exists
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            # Save the file
-            file_storage.save(save_path)
+            for file_storage in test_files:
+                # Recreate the subdirectory structure from the filename inside the temporary directory
+                save_path = os.path.join(temp_dir, file_storage.filename)
+                # Ensure the subdirectory for this file exists
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                # Save the file
+                file_storage.save(save_path)
 
-        print("Finished saving test files.") # Debug print
+            print("Finished saving test files.") # Debug print
+
+        except Exception as e:
+            print(f"Error during file reception or saving: {e}")
+            # Return a specific error response if saving fails
+            return jsonify({"error": f"Error receiving or saving test files: {e}"}), 500 # Use 500 as it's a server-side issue
 
 
         # 2. Load Model
-        selected_model_path = request.form.get('modelPath')
-        if not selected_model_path:
-            return jsonify({"error": "No model path selected."}), 400
-
-        # IMPORTANT SECURITY/VALIDATION: Check if the model path is safe!
-        # Prevent directory traversal attacks. Ensure path is within MODEL_SAVE_DIR.
-        abs_model_save_dir = os.path.abspath(MODEL_SAVE_DIR)
-        abs_selected_model_path = os.path.abspath(selected_model_path)
-
-        # Ensure the selected model path is actually a path within the designated models directory
-        if not abs_selected_model_path.startswith(abs_model_save_dir):
-             print(f"SECURITY ALERT: Attempted to load model outside MODEL_SAVE_DIR: {selected_model_path}")
-             return jsonify({"error": "Invalid model path specified."}), 400
-
-        if not os.path.exists(abs_selected_model_path):
-            print(f"Model file not found: {selected_model_path}")
-            return jsonify({"error": f"Model file not found at server path: {selected_model_path}"}), 404
-
+        print("Attempting to load model...") # Debug print
         try:
-            print(f"Loading model from {selected_model_path}...") # Debug print
+            selected_model_path = request.form.get('modelPath')
+            if not selected_model_path:
+                print("Error: No model path selected.") # Debug print
+                return jsonify({"error": "No model path selected."}), 400
+
+            # IMPORTANT SECURITY/VALIDATION: Check if the model path is safe!
+            abs_model_save_dir = os.path.abspath(MODEL_SAVE_DIR)
+            abs_selected_model_path = os.path.abspath(selected_model_path)
+
+            if not abs_selected_model_path.startswith(abs_model_save_dir):
+                 print(f"SECURITY ALERT: Attempted to load model outside MODEL_SAVE_DIR: {selected_model_path}")
+                 return jsonify({"error": "Invalid model path specified."}), 400 # Use 400 for bad client input
+
+            if not os.path.exists(abs_selected_model_path):
+                print(f"Model file not found: {selected_model_path}") # Debug print
+                return jsonify({"error": f"Model file not found at server path: {selected_model_path}"}), 404 # Use 404 if resource not found
+
             # Use your load_model_from_file function
-            model = load_model_from_file(abs_selected_model_path) # Using your function
+            model = load_model_from_file(abs_selected_model_path) # Assuming this function handles its own basic printing
             if model is None:
-                 # load_model_from_file prints the specific error
-                 return jsonify({"error": f"Failed to load model from {selected_model_path}."}), 500
+                 # load_model_from_file should print details about the load failure
+                 return jsonify({"error": f"Failed to load model from {selected_model_path}. Check server logs for details."}), 500 # Use 500 for server error
 
             print("Model loaded successfully.") # Debug print
-        except Exception as e: # Catch any exceptions *from* load_model_from_file if it raises instead of returns None
-            print(f"Unexpected error during model loading: {e}")
-            return jsonify({"error": f"Unexpected error during model loading: {e}"}), 500
+        except Exception as e: # Catch any unexpected errors during model loading
+             print(f"Unexpected error during model loading: {e}")
+             return jsonify({"error": f"Unexpected error during model loading: {e}"}), 500
 
 
-        # 3. Create Test Dataset from the temporary directory
-        # Labels will be inferred directly from folder names in the uploaded data
+        # 3. Load Class Names Mapping (SKIP - using folder names)
+        # If you were loading from JSON, this would be its own try/except block
+
+        # 4. Create Test Dataset from the temporary directory
+        print("Attempting to create test dataset...") # Debug print
         try:
-            print(f"Creating test dataset from {temp_dir}...") # Debug print
             # image_dataset_from_directory infers class names from folder names
             test_ds = image_dataset_from_directory(
                 temp_dir, # Point to the temporary directory where files were saved
@@ -166,13 +171,12 @@ def evaluate_model():
             # doesn't contain class subdirectories with images.
             if not test_ds.class_names:
                  print("Error: No classes inferred from test data folders.") # Debug print
-                 return jsonify({"error": "No valid image files found in class subfolders within the uploaded test data."}), 400
+                 return jsonify({"error": "No valid image files found in class subfolders within the uploaded test data. Ensure structure is class_name/image.jpg"}), 400 # Use 400 for bad client data
 
              # Get the class names *inferred from the test data folders*
             test_dataset_class_names = test_ds.class_names
             print(f"Test dataset inferred classes: {test_dataset_class_names}") # Debug print
             print(f"Inferred {len(test_dataset_class_names)} classes.") # Debug print
-
 
             # Apply the same preprocessing used during training
             # Make sure preprocess_input matches the model architecture (ResNet50)
@@ -181,23 +185,21 @@ def evaluate_model():
             test_ds = test_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
 
             print(f"Created test dataset with {len(test_ds)} batches.") # Debug print
-            print(f"Total images in test dataset: {test_ds.cardinality().numpy() * test_ds.element_spec[0].shape[0]}") # Approximate count
+            # print(f"Total images in test dataset: {test_ds.cardinality().numpy() * test_ds.element_spec[0].shape[0]}") # Debug print - requires iterating over dataset first, can be slow
 
 
         except Exception as e:
             print(f"Error creating test dataset from {temp_dir}: {e}")
-            # This could happen if the uploaded folder structure isn't class/image or other data issues
-            return jsonify({"error": f"Error creating test dataset from uploaded files. Ensure structure is class_name/image.jpg: {e}"}), 400
+            # This could happen due to incorrect folder structure, corrupt images, etc.
+            return jsonify({"error": f"Error creating test dataset from uploaded files: {e}"}), 400 # Use 400 for client data issue
 
 
-        # 4. Evaluate the Model and Calculate Metrics
+        # 5. Evaluate the Model and Calculate Metrics
+        print("Attempting to evaluate model and calculate metrics...") # Debug print
         try:
             print("Starting core model evaluation (loss, accuracy)...") # Debug print
             # Evaluate returns loss and metrics defined in model.compile
-            # results_from_evaluate will be a list (e.g., [loss, accuracy])
-            # model.metrics_names is a list (e.g., ['loss', 'accuracy'])
-            # Use verbose=0 to prevent a progress bar in the console logs
-            results_from_evaluate = model.evaluate(test_ds, verbose=0)
+            results_from_evaluate = model.evaluate(test_ds, verbose=0) # verbose=0 prevents progress bar clutter in logs
             print("Model evaluation finished.") # Debug print
 
             # Ensure results_from_evaluate is a list
@@ -211,75 +213,66 @@ def evaluate_model():
 
             # --- Calculate detailed metrics (Precision, Recall, F1, Confusion Matrix) ---
             print("Calculating detailed metrics...") # Debug print
+            # Ensure this only runs if you want detailed metrics and scikit-learn is installed
+            # You might want to wrap this section in a check if scikit-learn imports succeeded
 
             # Get true labels (integer indices). Convert from one-hot if necessary.
-            # Collect all batches and concatenate
             all_labels = []
-            for images, labels in test_ds:
+            for images, labels in test_ds: # Iterate to get true labels
                 all_labels.append(labels.numpy())
             true_labels_int = np.concatenate(all_labels, axis=0)
-
-            # Convert one-hot true labels to integer indices if label_mode='categorical' was used for the dataset
+            # Convert one-hot true labels to integer indices if label_mode='categorical'
             if test_ds.element_spec[1].shape[-1] > 1 and true_labels_int.ndim > 1:
                  true_labels_int = np.argmax(true_labels_int, axis=1)
 
 
             # Get predictions (raw output, e.g., probabilities from softmax)
-            # Collect all batches and concatenate
-            all_predictions = []
-            for images, labels in test_ds: # Iterate through test_ds again to get images for predict
-                 all_predictions.append(model.predict(images)) # Predict batch by batch
-
-            # Alternative: Predict on the whole dataset directly if memory allows (less common)
-            # predictions_raw = model.predict(test_ds)
-
-            # Concatenate predictions from batches
-            predictions_raw = np.concatenate(all_predictions, axis=0)
+            print("Getting model predictions for detailed metrics...") # Debug print
+            predictions_raw = model.predict(test_ds) # Predict on the whole dataset
+            print("Predictions obtained.") # Debug print
 
 
             # Convert predictions to integer indices (e.g., using argmax for softmax output)
             predicted_labels_int = np.argmax(predictions_raw, axis=1)
 
-            # Use the class names inferred from the test dataset for metrics reporting - they match the true labels
+            # Use the class names inferred from the test dataset for metrics reporting
             sorted_class_labels = test_ds.class_names # These are sorted alphabetically by default
 
-            # Calculate Classification Report (includes precision, recall, f1-score per class and overall)
-            # target_names ensures the report uses the actual class names
-            # zero_division='warn' or 0 or 1 depending on desired behavior for classes with no true/predicted samples
+            # Calculate Classification Report
+            # zero_division=0 handles potential cases with no true/predicted samples for a class
             report = classification_report(true_labels_int, predicted_labels_int, target_names=sorted_class_labels, output_dict=True, zero_division=0)
             evaluation_metrics['classification_report'] = report
             print("Classification report calculated.") # Debug print
-            print("Report:", report)
-
 
             # Calculate Confusion Matrix
             cm = confusion_matrix(true_labels_int, predicted_labels_int)
-            # Convert confusion matrix (numpy array) to list for JSON serialization
-            evaluation_metrics['confusion_matrix'] = cm.tolist()
-            # Add the order of classes for the confusion matrix (matches report order)
-            evaluation_metrics['confusion_matrix_labels'] = sorted_class_labels
+            evaluation_metrics['confusion_matrix'] = cm.tolist() # Convert numpy array to list
+            evaluation_metrics['confusion_matrix_labels'] = sorted_class_labels # Add class order
             print("Confusion matrix calculated.") # Debug print
 
+            # Add the class names inferred from the test data folders
+            evaluation_metrics['inferred_class_names'] = sorted_class_labels
 
             evaluation_metrics['status'] = 'success' # Update overall status
 
 
-            # 5. Return results as JSON
+            # 6. Return results as JSON
             print("Returning evaluation metrics as JSON.") # Debug print
             return jsonify(evaluation_metrics)
 
         except Exception as e:
             print(f"Error during model evaluation or metric calculation: {e}")
-            return jsonify({"error": f"Error during model evaluation or metric calculation: {e}"}), 500
+            # This could be TensorFlow execution error, scikit-learn error, etc.
+            return jsonify({"error": f"Error during model evaluation or metric calculation: {e}"}), 500 # Use 500
+
 
     except Exception as e:
-        # This catches errors that might happen before the specific try blocks inside (e.g., file saving)
-        print(f"An unexpected error occurred before evaluation steps: {e}") # Debug print
-        return jsonify({"error": f"An unexpected server error occurred: {e}"}), 500
+        # This catches errors that might happen *very* early, before specific blocks
+        print(f"An unexpected error occurred before specific evaluation steps: {e}") # Debug print
+        return jsonify({"error": f"An unexpected server error occurred: {e}"}), 500 # Use 500
 
     finally:
-        # 6. Clean up the temporary directory
-        # This block runs regardless of whether an exception occurred in the try block
+        # 7. Clean up the temporary directory
         if temp_dir and os.path.exists(temp_dir):
             try:
                 print(f"Cleaning up temporary directory: {temp_dir}") # Debug print
@@ -287,7 +280,7 @@ def evaluate_model():
                 print("Cleanup complete.") # Debug print
             except Exception as e:
                 print(f"Error cleaning up temporary directory {temp_dir}: {e}")
-                # Log this error, but don't block the response.
+                # Log this, but don't block the response.
 
 @app.route('/list_models', methods=['GET'])
 def list_available_models():
