@@ -15,6 +15,7 @@ from tensorflow.keras.optimizers import Adam # Optimizer
 from tensorflow.keras.losses import CategoricalCrossentropy # Loss function
 from tensorflow.keras.preprocessing import image_dataset_from_directory # Data loading utility
 from sklearn.metrics import classification_report, confusion_matrix
+from tensorflow.keras.utils import load_img, img_to_array
 
 def build_finetuned_model(num_classes, base_model_architecture='ResNet50', input_shape=(224, 224, 3)):
     print(f"Building fine-tuned model for {num_classes} classes based on {base_model_architecture}...")
@@ -351,7 +352,6 @@ def show_evaluation_page():
     return render_template('evaluate_model.html')
 
 @app.route('/evaluate', methods=["POST"])
-@app.route('/evaluate', methods=["POST"])
 def evaluate_model():
     # Initialize temporary directory variable outside the try block
     temp_dir = None
@@ -619,30 +619,178 @@ def list_available_models():
 def show_classification_page():
     return render_template('classify_image.html')
 
+
 @app.route("/classify", methods=["POST"])
 def get_prediction():
-    # Image file not in request
-    if 'image' not in request.files:
-        response = {"error": "You must upload an image."}
-        return jsonify(response), 400
-    
-    file = request.files['image']
+    print("--- Received POST request to /classify ---") # Debug print
 
-    # Image file not selected
-    if file.filename == '':
-        response = {"error": "No selected file."}
-        return jsonify(response), 400
-    
-    # Prediction logic
+    # --- No longer checking loaded_default_model/default_model_class_names here ---
 
-    # Successfull prediction
-    predicted_label = "simulated_prediction" # Replace with actual
-    confidence = 0.99 # Replace with actual
+    # 1. Get the selected model path from the form
+    print("Attempting to get selected model path...") # Debug print
+    selected_model_path = request.form.get('modelPath')
+    if not selected_model_path:
+        print("Error: No model path selected in form.") # Debug print
+        return jsonify({"error": "No model selected for classification."}), 400 # 400 for bad client request
 
-    success_response = {
-        "message": "Prediction successful!",
-        "filename": file.filename,
-        "predicted_label": predicted_label,
-        "confidence": confidence
-    }
-    return jsonify(success_response), 200
+
+    # 2. Load the selected model
+    print(f"Attempting to load model from: {selected_model_path}") # Debug print
+    model = None # Initialize model variable
+    try:
+        # IMPORTANT SECURITY/VALIDATION: Check if the model path is safe!
+        abs_model_save_dir = os.path.abspath(MODEL_SAVE_DIR)
+        abs_selected_model_path = os.path.abspath(selected_model_path)
+
+        if not abs_selected_model_path.startswith(abs_model_save_dir):
+             print(f"SECURITY ALERT: Attempted to load model outside MODEL_SAVE_DIR: {selected_model_path}")
+             return jsonify({"error": "Invalid model path specified."}), 400 # Use 400 for bad client input
+
+        if not os.path.exists(abs_selected_model_path):
+            print(f"Model file not found: {selected_model_path}") # Debug print
+            return jsonify({"error": f"Model file not found at server path: {selected_model_path}"}), 404 # Use 404 if resource not found
+
+        # Use your load_model_from_file function - It should load with compile=False
+        model = load_model_from_file(abs_selected_model_path) # Assuming this function handles its own basic printing
+        if model is None:
+             print("load_model_from_file returned None.") # Debug print
+             return jsonify({"error": f"Failed to load model from {selected_model_path}. Check server logs for details."}), 500 # 500 for server error
+
+        print("Model loaded successfully.") # Debug print
+
+    except Exception as e: # Catch any unexpected errors *during* model loading (e.g., if load_model_from_file raises)
+         print(f"Unexpected error during model loading process: {e}")
+         return jsonify({"error": f"Unexpected error during model loading process: {e}"}), 500
+
+
+    # 3. Load the corresponding Class Names Mapping
+    print("Attempting to load class names mapping...") # Debug print
+    # class_names is the variable that will hold the loaded list
+    class_names = None
+    try:
+        # Assume class_names.json is saved in the same directory as the model file
+        model_dir = os.path.dirname(abs_selected_model_path)
+        # *** ASSUMES class_names JSON is named 'class_names_<timestamp>.json'
+        # related to the model file name. Adjust this logic if your naming differs.
+        # A more robust approach would be to include the class_names_path in the /list_models JSON response.
+
+        # Simple approach assuming pattern like model_XXX.keras and class_names_XXX.json
+        model_filename = os.path.basename(abs_selected_model_path) # e.g., finetuned_model_1750259108.keras
+        # Replace the extension and start
+        if model_filename.endswith('.keras'):
+             base_name = model_filename[:-len('.keras')] # finetuned_model_1750259108
+             # Assuming the class names file has a corresponding name based on the base name
+             class_names_filename = base_name.replace('finetuned_model', 'class_names') + '.json' # Adjust if needed
+        elif model_filename.endswith('.h5'):
+             base_name = model_filename[:-len('.h5')]
+             class_names_filename = base_name.replace('finetuned_model', 'class_names') + '.json' # Adjust if needed
+        else:
+             # Handle other formats or if naming convention doesn't match
+             print(f"Warning: Model filename doesn't match expected pattern to find class names: {model_filename}") # Debug print
+             # Fallback or error handling needed here - returning an error is safest if names are critical
+
+        class_names_path = os.path.join(model_dir, class_names_filename) # Construct full path
+
+
+        if os.path.exists(class_names_path):
+            with open(class_names_path, 'r') as f:
+                class_names = json.load(f) # Load the list
+            print(f"Class names loaded from {class_names_path} ({len(class_names)} classes).") # Debug print
+        else:
+            print(f"Error: Class names file not found at {class_names_path}") # Debug print
+            # Class names are essential for meaningful output
+            return jsonify({"error": f"Class names mapping file not found for the selected model at {class_names_path}. Cannot decode prediction result."}), 404 # 404 for missing resource
+
+    except Exception as e:
+        print(f"Error loading class names file: {e}") # Debug print
+        return jsonify({"error": f"Error loading class names file: {e}"}), 500 # 500 for server error
+
+    # --- Crucial Check: Ensure class_names was successfully loaded ---
+    # This check is redundant if the blocks above return errors, but good practice
+    if class_names is None:
+         print("Internal Error: class_names variable is None after loading attempt.") # Debug print
+         return jsonify({"error": "Internal server error: Failed to load class names mapping."}), 500 # 500 for server error
+
+
+    # 4. Check for and get the uploaded image file
+    print("Attempting to get uploaded image file...") # Debug print
+    # This check is also in the initial section, but keep here for completeness
+    if 'image' not in request.files or not request.files['image']:
+         print("Error: No 'image' file part in request after initial check.") # Debug print
+         return jsonify({"error": "No image file uploaded."}), 400 # 400 for bad client request
+
+    file = request.files['image'] # Get the FileStorage object
+
+
+    # Define the target image size (must match what your model expects)
+    # *** ADJUST THIS IF YOUR MODEL EXPECTS A DIFFERENT SIZE ***
+    TARGET_IMAGE_SIZE = (224, 224)
+
+
+    # --- 5. Process the image and get prediction ---
+    print(f"Processing image: {file.filename}") # Debug print
+    try:
+        # Load the image file from the FileStorage object stream
+        img = load_img(file.stream, target_size=TARGET_IMAGE_SIZE)
+        print("Image loaded and resized.") # Debug print
+
+        # Convert the PIL image to a NumPy array
+        img_array = img_to_array(img)
+        print(f"Image converted to array with shape: {img_array.shape}") # Debug print
+
+        # Add a batch dimension at the beginning.
+        img_array_batched = np.expand_dims(img_array, axis=0)
+        print(f"Added batch dimension, shape: {img_array_batched.shape}") # Debug print
+
+        # Apply the model's preprocessing (scaling, centering, etc.)
+        # *** MAKE SURE preprocess_input MATCHES YOUR MODEL ARCHITECTURE (ResNet50) ***
+        processed_image_array = preprocess_input(img_array_batched)
+        print("Image preprocessing complete.") # Debug print
+
+        # Make a prediction
+        print("Getting model prediction...") # Debug print
+        predictions_raw = model.predict(processed_image_array) # Use the loaded 'model' variable
+        print("Prediction obtained.") # Debug print
+        # predictions_raw will be a numpy array like [[p1, p2, ..., pN]] where N is the number of classes
+
+        # Get the predicted class index (index with the highest probability)
+        predicted_index = np.argmax(predictions_raw[0]) # [0] because batch size is 1
+        print(f"Predicted index: {predicted_index}") # Debug print
+
+        # Get the predicted class name using the loaded mapping (class_names)
+        # Ensure predicted_index is within the bounds of the class_names list
+        # *** USE the local 'class_names' variable here ***
+        if 0 <= predicted_index < len(class_names):
+             predicted_label = class_names[predicted_index]
+             print(f"Predicted label: {predicted_label}") # Debug print
+        else:
+             # This indicates a mismatch in the number of classes between the model output and the class_names file
+             predicted_label = "Unknown (Index out of bounds)"
+             print(f"Error: Predicted index {predicted_index} is out of bounds for loaded class names list with {len(class_names)} classes.") # Debug print
+             # You might want to return an error here instead of a successful response with "Unknown"
+             # return jsonify({"error": "Class index mismatch between model output and class names mapping."}), 500
+
+
+        # Get the confidence score for the top prediction
+        # np.max finds the maximum value (the highest probability)
+        confidence = float(np.max(predictions_raw[0])) # Use float() for JSON serialization
+        print(f"Confidence: {confidence:.4f}") # Debug print with formatting
+
+
+        # --- 6. Return success response ---
+        success_response = {
+            "message": "Prediction successful!",
+            "filename": file.filename,
+            "predicted_label": predicted_label,
+            "confidence": confidence,
+            # Optional: Include the list of all class names for reference in the UI
+            "class_names": class_names # Use the local 'class_names' variable here
+        }
+        print("Returning success response for classify.") # Debug print
+        return jsonify(success_response), 200 # Return 200 OK
+
+    except Exception as e:
+        # Catch any error during image processing, prediction, or decoding
+        print(f"Error during image processing or prediction: {e}") # Debug print the specific error
+        # Return a JSON error response with a 500 Internal Server Error status code
+        return jsonify({"error": f"Error processing image or getting prediction: {e}"}), 500 # Return 500 for server error

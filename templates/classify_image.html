@@ -3,14 +3,34 @@
 <head>
     <title>Upload Image for Classification</title>
     <style>
-        /* Optional styling for better appearance */
+        /* General body styling from your example */
         body { font-family: sans-serif; margin: 20px; }
         form { margin-top: 20px; border: 1px solid #ccc; padding: 20px; border-radius: 5px; }
         label { display: block; margin-bottom: 10px; font-weight: bold; }
-        input[type="file"] { margin-bottom: 20px; }
+
+         /* Styling for file input and select */
+        input[type="file"],
+        select { margin-bottom: 20px; display: block; width: calc(100% - 22px); padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 1rem; }
+
         button { padding: 10px 15px; margin-top: 5px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
         button:hover { background-color: #0056b3; }
-        #result { margin-top: 20px; padding: 15px; border: 1px solid #eee; background-color: #f9f9f9; }
+        #result { margin-top: 20px; padding: 15px; border: 1px solid #eee; background-color: #f9f9f9; border-radius: 5px; }
+        #result h2 { margin-top: 0; color: #333; }
+        #resultJson {
+             margin-top: 10px;
+             padding: 10px;
+             border: 1px solid #ddd;
+             background-color: #fff;
+             font-family: monospace;
+             white-space: pre-wrap;
+             word-wrap: break-word;
+             max-height: 300px;
+             overflow-y: auto;
+             border-radius: 4px;
+             color: #555;
+             font-size: 0.9rem;
+        }
+
         /* Style for the image preview area */
         #imagePreview {
             margin-top: 15px;
@@ -18,27 +38,55 @@
             padding: 10px;
             display: none; /* Hide initially */
             text-align: center; /* Center the image */
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+         #imagePreview p {
+             margin-top: 0;
+             font-weight: bold;
+             color: #555;
         }
         #imagePreview img {
             max-width: 100%; /* Ensure image fits within the preview area */
             height: auto;
-            display: block; /* Prevent extra space below image */
-            margin: 0 auto; /* Center the image */
+            display: block;
+            margin: 0 auto;
+             border: 1px solid #eee;
         }
-        img {
-            width: 300px;
-            height: 300px;
-        }
+        /* Remove fixed size if you have it elsewhere */
+        /* img { width: 300px; height: 300px; } */
+
+         /* Optional: Loading indicator styling */
+         #loadingIndicator {
+             display: none; /* Hidden by default */
+             margin-top: 15px;
+             padding: 10px;
+             background-color: #e9f5ff;
+             border: 1px solid #b3e0ff;
+             border-radius: 5px;
+             color: #0056b3;
+             font-weight: bold;
+             text-align: center;
+         }
     </style>
 </head>
 <body>
 
     <h1>Image Classification</h1>
-    <p>Upload an image to get its classification.</p>
+    <p>Upload an image and select a model to get its classification.</p>
 
-    <form id="uploadForm" action="{{ url_for('classify_image') }}" method="post" enctype="multipart/form-data">
+    <form id="classificationForm" action="/classify" method="post" enctype="multipart/form-data">
+
+         <!-- Opcja wyboru modelu -->
+        <label for="modelSelect">Select Trained Model:</label>
+        <select id="modelSelect" name="modelPath" required>
+            <!-- Opcje będą dynamicznie dodane przez backend -->
+            <option value="">-- Loading models... --</option>
+        </select>
+
+
         <label for="imageFile">Select Image:</label>
-        <input type="file" id="imageFile" name="image" accept="image/*">
+        <input type="file" id="imageFile" name="image" accept="image/*" required>
 
         <!-- Area where the selected image will be displayed -->
         <div id="imagePreview">
@@ -49,68 +97,176 @@
         <button type="submit">Classify Image</button>
     </form>
 
+     <div id="loadingIndicator">
+        Processing image and getting prediction...
+    </div>
+
+
     <div id="result" style="display: none;">
         <h2>Classification Result:</h2>
         <pre id="resultJson"></pre>
     </div>
 
     <script>
-        const form = document.getElementById('uploadForm');
-        const imageFile = document.getElementById('imageFile'); // Get the file input element
-        const imagePreviewDiv = document.getElementById('imagePreview'); // Get the preview div
-        const previewImage = document.getElementById('previewImage'); // Get the img tag for preview
+        const form = document.getElementById('classificationForm'); // Updated form ID
+        const imageFile = document.getElementById('imageFile');
+        const modelSelect = document.getElementById('modelSelect'); // Added model select
+        const imagePreviewDiv = document.getElementById('imagePreview');
+        const previewImage = document.getElementById('previewImage');
         const resultDiv = document.getElementById('result');
         const resultJsonPre = document.getElementById('resultJson');
+        const loadingIndicator = document.getElementById('loadingIndicator'); // Added loading indicator
 
-        // --- Add an event listener to the file input ---
-        imageFile.addEventListener('change', function() {
-            const file = this.files[0]; // Get the first selected file
 
-            if (file) {
-                const reader = new FileReader(); // Create a FileReader object
+        // --- Function to fetch and populate model list (Same as evaluation page) ---
+        async function fetchModels() {
+            try {
+                const response = await fetch('/list_models'); // Use your existing endpoint
 
-                reader.onload = function(e) {
-                    // When the file is read successfully, the result (data URL) is in e.target.result
-                    previewImage.src = e.target.result; // Set the src of the img tag to the data URL
-                    imagePreviewDiv.style.display = 'block'; // Show the preview area
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorBody.error || response.statusText}`);
                 }
 
-                // Read the file as a Data URL (base64 encoded string)
+                const models = await response.json();
+
+                modelSelect.innerHTML = ''; // Clear current options
+
+                if (models.length === 0) {
+                    modelSelect.innerHTML = '<option value="">-- No models found --</option>';
+                    modelSelect.disabled = true;
+                    form.querySelector('button[type="submit"]').disabled = true;
+
+                } else {
+                    const defaultOption = document.createElement('option');
+                    defaultOption.value = "";
+                    defaultOption.textContent = "-- Select a model --";
+                    modelSelect.appendChild(defaultOption);
+
+                    models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.path; // Path needed by backend
+                        option.textContent = model.name; // Name for display
+                        modelSelect.appendChild(option);
+                    });
+                    modelSelect.disabled = false;
+                    form.querySelector('button[type="submit"]').disabled = false;
+                }
+
+            } catch (error) {
+                console.error('Error fetching models:', error);
+                modelSelect.innerHTML = '<option value="">-- Error loading models --</option>';
+                modelSelect.disabled = true;
+                form.querySelector('button[type="submit"]').disabled = true;
+            }
+        }
+
+        // Fetch models when the page loads
+        fetchModels();
+
+
+        // --- Image Preview Logic ---
+        imageFile.addEventListener('change', function() {
+            const file = this.files[0];
+
+            if (file) {
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    previewImage.src = e.target.result;
+                    imagePreviewDiv.style.display = 'block';
+                    // Also clear previous results and hide loading indicator
+                     resultDiv.style.display = 'none';
+                     resultJsonPre.textContent = '';
+                     loadingIndicator.style.display = 'none';
+                }
+
                 reader.readAsDataURL(file);
 
             } else {
-                // If no file is selected, hide the preview
                 previewImage.src = "#";
                 imagePreviewDiv.style.display = 'none';
+                 resultDiv.style.display = 'none';
+                 resultJsonPre.textContent = '';
+                 loadingIndicator.style.display = 'none';
             }
         });
 
-        // --- Existing form submission logic (unchanged) ---
+        // --- Event Listeners ---
+        // Clear results when model selection changes
+         modelSelect.addEventListener('change', function() {
+            resultDiv.style.display = 'none';
+            resultJsonPre.textContent = '';
+             loadingIndicator.style.display = 'none';
+        });
+
+
+        // --- Form Submission Logic ---
         form.addEventListener('submit', async function(event) {
             event.preventDefault();
 
-            const formData = new FormData(form);
+            // Basic validation: check if a model is selected and an image is provided
+             if (modelSelect.value === "") {
+                 alert("Please select a model for classification.");
+                 return;
+            }
+
+             const imageFileSelected = imageFile.files.length > 0;
+             if (!imageFileSelected) {
+                 alert("Please select an image file.");
+                 return;
+             }
+
+
+            // Hide previous results and show loading indicator
+            resultDiv.style.display = 'none';
+            resultJsonPre.textContent = '';
+            loadingIndicator.style.display = 'block';
+
+            const formData = new FormData(form); // Collect form data (includes modelPath and image)
+
+            console.log(`Selected model for classification: ${formData.get('modelPath')}`);
+            console.log(`Selected image file: ${formData.get('image').name}`);
+
 
             try {
-                const response = await fetch('/classify', {
+                const response = await fetch('/classify', { // Ensure this URL is correct
                     method: 'POST',
-                    body: formData
+                    body: formData // FormData handles file uploads
                 });
 
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(`HTTP error! status: ${response.status} - ${errorData.error || response.statusText}`);
-                }
+                // Hide loading indicator regardless of response success
+                loadingIndicator.style.display = 'none';
 
+                // Attempt to parse JSON even on non-OK response
                 const result = await response.json();
 
-                resultJsonPre.textContent = JSON.stringify(result, null, 2);
-                resultDiv.style.display = 'block';
+                // Check if the response is OK (status code 2xx)
+                if (!response.ok) {
+                     // Assuming backend returns {"error": "..."} on failure
+                    const errorMsg = result.error || `HTTP error! status: ${response.status} - ${response.statusText}`;
+                    throw new Error(errorMsg);
+                }
+
+                // --- Display the success result ---
+                // Assuming backend returns JSON like {"predicted_label": "cat", "confidence": 0.98, ...}
+                if (result.predicted_label) {
+                    // Display a user-friendly message
+                    resultJsonPre.textContent = `Predicted Class: ${result.predicted_label}\nConfidence: ${result.confidence ? result.confidence.toFixed(4) : 'N/A'}`;
+                } else {
+                    // Fallback to displaying the raw JSON if expected fields are missing
+                    resultJsonPre.textContent = JSON.stringify(result, null, 2);
+                }
+
+                resultDiv.style.display = 'block'; // Show the result area
 
             } catch (error) {
-                console.error('Error:', error);
+                console.error('Error during classification:', error);
+                // Hide loading indicator
+                loadingIndicator.style.display = 'none';
+                // Display error message to the user
                 resultJsonPre.textContent = `Error: ${error.message}`;
-                resultDiv.style.display = 'block';
+                resultDiv.style.display = 'block'; // Still show the result area to display the error
             }
         });
     </script>
