@@ -1,18 +1,20 @@
 from flask import Flask, request, jsonify, render_template
 import os
-# import json # Removed - no longer loading class_names.json
+# import json # Not needed if not loading class_names.json file
 import shutil # Added for temporary directory cleanup
 import tempfile # Added for creating temporary directories
 
 # Assume necessary imports for TensorFlow and Keras are available
 import tensorflow as tf
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import load_model # To load the saved model
 from tensorflow.keras.preprocessing import image_dataset_from_directory
 # Import preprocess_input based on the model architecture you are using (ResNet50)
 from tensorflow.keras.applications.resnet50 import preprocess_input
 # If you want detailed metrics (Precision, Recall, F1, Confusion Matrix)
 from sklearn.metrics import classification_report, confusion_matrix # Added for detailed metrics
 import numpy as np # Added for handling array data
+from tensorflow.keras.optimizers import Adam # Need an optimizer to compile
+from tensorflow.keras.losses import CategoricalCrossentropy # Need a loss to compile
 
 def load_model_from_file(model_path):
     """
