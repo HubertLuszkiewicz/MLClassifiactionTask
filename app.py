@@ -14,6 +14,7 @@ from tensorflow.keras.layers import Dense, GlobalAveragePooling2D # Layers for t
 from tensorflow.keras.optimizers import Adam # Optimizer
 from tensorflow.keras.losses import CategoricalCrossentropy # Loss function
 from tensorflow.keras.preprocessing import image_dataset_from_directory # Data loading utility
+from sklearn.metrics import classification_report, confusion_matrix
 
 def build_finetuned_model(num_classes, base_model_architecture='ResNet50', input_shape=(224, 224, 3)):
     print(f"Building fine-tuned model for {num_classes} classes based on {base_model_architecture}...")
