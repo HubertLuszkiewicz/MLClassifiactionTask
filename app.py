@@ -1,20 +1,51 @@
 from flask import Flask, request, jsonify, render_template
 import os
-# import json # Not needed if not loading class_names.json file
-import shutil # Added for temporary directory cleanup
-import tempfile # Added for creating temporary directories
+import shutil # For temporary directory cleanup
+import tempfile # For creating temporary directories
+import json # For saving class names
 
 # Assume necessary imports for TensorFlow and Keras are available
 import tensorflow as tf
-from tensorflow.keras.models import load_model # To load the saved model
-from tensorflow.keras.preprocessing import image_dataset_from_directory
-# Import preprocess_input based on the model architecture you are using (ResNet50)
-from tensorflow.keras.applications.resnet50 import preprocess_input
-# If you want detailed metrics (Precision, Recall, F1, Confusion Matrix)
-from sklearn.metrics import classification_report, confusion_matrix # Added for detailed metrics
-import numpy as np # Added for handling array data
-from tensorflow.keras.optimizers import Adam # Need an optimizer to compile
-from tensorflow.keras.losses import CategoricalCrossentropy # Need a loss to compile
+from tensorflow.keras.models import Model, load_model # Need Model for building, load_model if loading base from file
+from tensorflow.keras.applications import ResNet50 # Or other base model
+from tensorflow.keras.applications.resnet50 import preprocess_input # Preprocessing for ResNet50
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D # Layers for the new top
+from tensorflow.keras.optimizers import Adam # Optimizer
+from tensorflow.keras.losses import CategoricalCrossentropy # Loss function
+from tensorflow.keras.preprocessing import image_dataset_from_directory # Data loading utility
+
+def build_finetuned_model(num_classes, base_model_architecture='ResNet50', input_shape=(224, 224, 3)):
+    print(f"Building fine-tuned model for {num_classes} classes based on {base_model_architecture}...")
+
+    # --- 1. Load the pre-trained base model ---
+    if base_model_architecture == 'ResNet50':
+        # weights='imagenet': Use ImageNet weights
+        # include_top=False: Crucially, remove the original 1000-class top layer
+        base_model = ResNet50(weights='imagenet', include_top=False, input_shape=input_shape)
+        # You might load a pre-trained ResNet18 if you have its weights file
+        # base_model = load_model('/path/to/your/resnet18_base.h5', compile=False) # Example if saving just the base
+
+        # Freeze the base model layers initially for phase 1 training
+        for layer in base_model.layers:
+            layer.trainable = False
+    # Add elif for other architectures if needed
+    else:
+        raise ValueError(f"Unsupported base model architecture: {base_model_architecture}")
+
+    print("Base model loaded and frozen.")
+
+    # --- 2. Add new classification layers on top ---
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x) # Global pooling before dense layers
+    # Add a dropout layer for regularization if needed
+    # x = tf.keras.layers.Dropout(0.5)(x)
+    predictions = Dense(num_classes, activation='softmax')(x) # Final dense layer with NUM_CLASSES units
+
+    # --- 3. Create the full model ---
+    model = Model(inputs=base_model.input, outputs=predictions)
+
+    print("Fine-tuned model architecture created.")
+    return model
 
 def load_model_from_file(model_path):
     """
@@ -65,18 +96,253 @@ def show_training_page():
 
 @app.route('/train', methods=["POST"])
 def train_model():
-    training_files = request.files.getlist('trainingData')
+    # Initialize temporary directory variable
+    temp_dir = None
+    training_status = {"status": "processing"}
 
-    if not training_files:
-        return jsonify({"error": "No training data files received."}), 400
+    try:
+        print("--- Received POST request to /train ---") # Debug print
 
-    # training logic
+        # 1. Receive and Save Training Data (Folder)
+        print("Attempting to receive and save training data folder...") # Debug print
+        try:
+            training_files = request.files.getlist('trainingData')
+            # We also expect a selected model path (for the base model to fine-tune)
+            # This might come from a separate dropdown for base models or be hardcoded
+            # For simplicity, let's assume we are fine-tuning a standard ResNet50 ImageNet here.
+            # If you need to select a base model file, you'd add an input for it.
 
-    return jsonify({
-        "status": "Data received",
-        "message": f"Successfully received {len(training_files)} training files. Processing...",
-        "training_file_count": len(training_files)
-    })
+            if not training_files:
+                print("Error: No training data files received.") # Debug print
+                return jsonify({"error": "No training data files received."}), 400
+
+            temp_dir = tempfile.mkdtemp(prefix='train_data_')
+            print(f"Saving {len(training_files)} training files to temporary directory: {temp_dir}") # Debug print
+
+            for file_storage in training_files:
+                # file_storage.filename contains the relative path (e.g., 'my_dataset/class_a/image.jpg')
+                save_path = os.path.join(temp_dir, file_storage.filename)
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                file_storage.save(save_path)
+
+            print("Finished saving training data files.") # Debug print
+
+        except Exception as e:
+            print(f"Error during training data reception or saving: {e}")
+            return jsonify({"error": f"Error receiving or saving training data files: {e}"}), 500
+
+        # --- Find the root directory within the temporary directory ---
+        # (Similar logic as in evaluate_model)
+        dataset_root_in_temp = None
+        try:
+            items_in_temp_dir = os.listdir(temp_dir)
+            if len(items_in_temp_dir) == 1 and os.path.isdir(os.path.join(temp_dir, items_in_temp_dir[0])):
+                 dataset_root_name = items_in_temp_dir[0]
+                 dataset_root_in_temp = os.path.join(temp_dir, dataset_root_name)
+                 print(f"Identified dataset root folder inside temp dir: {dataset_root_in_temp}") # Debug print
+            else:
+                 print(f"Error: Unexpected structure inside temp directory. Expected a single root folder.") # Debug print
+                 print(f"Contents: {items_in_temp_dir}") # Debug print
+                 return jsonify({"error": "Uploaded training data has an unexpected structure. Please upload a single root folder containing class subfolders."}), 400
+
+        except Exception as e:
+            print(f"Error identifying dataset root folder in temp dir: {e}")
+            return jsonify({"error": f"Server error processing uploaded folder structure: {e}"}), 500
+
+
+        # 2. Create Training and Validation Datasets
+        print("Attempting to create training and validation datasets...") # Debug print
+        try:
+            # image_dataset_from_directory for training data
+            # Use a validation_split and subset for creating train/validation sets
+            train_ds = image_dataset_from_directory(
+                dataset_root_in_temp, # Point to the identified root folder
+                labels='inferred',
+                label_mode='categorical', # Or 'int', match your model's expected output
+                image_size=(224, 224), # Match model input size
+                batch_size=32,
+                shuffle=True,
+                seed=123, # Use a seed for reproducible split
+                validation_split=0.2, # Use 20% for validation
+                subset='training'
+            )
+
+            val_ds = image_dataset_from_directory(
+                dataset_root_in_temp,
+                labels='inferred',
+                label_mode='categorical',
+                image_size=(224, 224),
+                batch_size=32,
+                shuffle=False, # Don't shuffle validation
+                seed=123,
+                validation_split=0.2,
+                subset='validation'
+            )
+
+            # Get the class names from the training dataset
+            class_names = train_ds.class_names
+            num_classes = len(class_names)
+            print(f"Detected {num_classes} classes: {class_names}") # Debug print
+
+            if num_classes == 0:
+                 print("Error: No classes inferred from training data folders.") # Debug print
+                 return jsonify({"error": "No valid image files found in class subfolders for training."}), 400
+
+
+            # Apply preprocessing
+            preprocess_func = preprocess_input # Use the appropriate preprocess function for your base model
+
+            train_ds = train_ds.map(lambda x, y: (preprocess_func(x), y), num_parallel_calls=tf.data.AUTOTUNE)
+            val_ds = val_ds.map(lambda x, y: (preprocess_func(x), y), num_parallel_calls=tf.data.AUTOTUNE)
+
+            # Optimize data loading
+            train_ds = train_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+            val_ds = val_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+
+            print(f"Created training dataset ({len(train_ds)} batches) and validation dataset ({len(val_ds)} batches).") # Debug print
+
+        except Exception as e:
+            print(f"Error creating datasets from {dataset_root_in_temp}: {e}")
+            return jsonify({"error": f"Error creating training/validation datasets. Ensure structure is class_name/image.jpg: {e}"}), 400
+
+
+        # 3. Build the Fine-tuned Model
+        print("Attempting to build the fine-tuned model...") # Debug print
+        try:
+            # Build the model using the number of classes detected
+            model = build_finetuned_model(num_classes=num_classes, base_model_architecture='ResNet50') # Use your build function
+            print("Fine-tuned model built.") # Debug print
+
+        except Exception as e:
+             print(f"Error building model: {e}")
+             return jsonify({"error": f"Error building fine-tuned model: {e}"}), 500
+
+
+        # 4. Compile the Model (Phase 1: Train top layers)
+        print("Compiling model for Phase 1 training...") # Debug print
+        try:
+            model.compile(
+                optimizer=Adam(learning_rate=1e-3), # Higher learning rate for new layers
+                loss=CategoricalCrossentropy(),
+                metrics=['accuracy']
+            )
+            print("Model compiled for Phase 1.") # Debug print
+        except Exception as e:
+             print(f"Error compiling model (Phase 1): {e}")
+             return jsonify({"error": f"Error compiling model for training: {e}"}), 500
+
+
+        # 5. Train the Model (Phase 1)
+        print("Starting Phase 1 training (top layers)...") # Debug print
+        try:
+            history_phase1 = model.fit(
+                train_ds,
+                epochs=5, # Define number of epochs for phase 1
+                validation_data=val_ds,
+                verbose=1 # Set verbose level (1 for progress bar in logs)
+            )
+            print("Phase 1 training finished.") # Debug print
+
+        except Exception as e:
+             print(f"Error during Phase 1 training: {e}")
+             return jsonify({"error": f"Error during model training (Phase 1): {e}"}), 500
+
+        # --- Optional: Phase 2 Fine-tuning ---
+        # This takes longer and requires more resources. You might skip it
+        # or make it optional via the UI for simplicity initially.
+        # If you include it, remember to unfreeze layers and re-compile with a lower LR.
+
+        # print("Starting Phase 2 fine-tuning...")
+        # try:
+        #     # Unfreeze base model layers (or parts of it)
+        #     for layer in model.layers[0].layers: # model.layers[0] is the base_model
+        #         layer.trainable = True
+        #     print("Base model layers unfrozen.")
+
+        #     # Re-compile with lower learning rate
+        #     model.compile(
+        #         optimizer=Adam(learning_rate=1e-5), # Lower learning rate
+        #         loss=CategoricalCrossentropy(),
+        #         metrics=['accuracy']
+        #     )
+        #     print("Model compiled for Phase 2.")
+
+        #     history_phase2 = model.fit(
+        #         train_ds,
+        #         epochs=5 + 5, # Total epochs (Phase 1 + Phase 2)
+        #         initial_epoch=5, # Start from end of Phase 1
+        #         validation_data=val_ds,
+        #         verbose=1
+        #     )
+        #     print("Phase 2 fine-tuning finished.")
+
+        # except Exception as e:
+        #      print(f"Error during Phase 2 fine-tuning: {e}")
+        #      return jsonify({"error": f"Error during model fine-tuning (Phase 2): {e}"}), 500
+        # --- End Optional Phase 2 ---
+
+
+        # 6. Save the Trained Model and Class Names
+        print("Attempting to save trained model and class names...") # Debug print
+        try:
+            # Ensure the save directory exists
+            os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
+
+            # Define a name for the saved model (e.g., timestamp or user-provided name)
+            # For now, let's use a simple name or include a timestamp
+            import time
+            timestamp = int(time.time())
+            model_save_name = f'finetuned_model_{timestamp}.keras' # Or .h5
+            model_save_path = os.path.join(MODEL_SAVE_DIR, model_save_name)
+
+            # Save the model
+            model.save(model_save_path)
+            print(f"Trained model saved to {model_save_path}") # Debug print
+
+            # Save the class names mapping (crucial for inference and evaluation)
+            class_names_save_path = os.path.join(MODEL_SAVE_DIR, f'class_names_{timestamp}.json') # Save with corresponding name
+            with open(class_names_save_path, 'w') as f:
+                 json.dump(class_names, f)
+            print(f"Class names mapping saved to {class_names_save_path}") # Debug print
+
+            # You might want to store info about the saved model (path, name, class_names path)
+            # in a database or a manifest file if you have many models.
+            # For now, we just print paths.
+
+            training_status['status'] = 'success'
+            training_status['message'] = 'Model training completed successfully!'
+            training_status['saved_model_path'] = model_save_path
+            training_status['saved_class_names_path'] = class_names_save_path
+            # Include final metrics if you want (e.g., from history_phase1.history)
+
+            # 7. Return success response with paths to saved files
+            print("Returning training success response.") # Debug print
+            return jsonify(training_status)
+
+        except Exception as e:
+            print(f"Error during model or class names saving: {e}")
+            # This is a critical error after training
+            training_status['status'] = 'error'
+            training_status['message'] = f'Model training completed, but failed to save model or class names: {e}'
+            return jsonify(training_status), 500 # Return 500 as it's a server error
+
+    except Exception as e:
+        # This catches errors that happen very early (e.g., tempfile, initial file receiving)
+        print(f"An unexpected error occurred during initial training processing: {e}") # Debug print
+        training_status['status'] = 'error'
+        training_status['message'] = f'An unexpected server error occurred during initial processing: {e}'
+        return jsonify(training_status), 500
+
+    finally:
+        # 8. Clean up the temporary data directory
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                print(f"Cleaning up temporary data directory: {temp_dir}") # Debug print
+                shutil.rmtree(temp_dir)
+                print("Cleanup complete.") # Debug print
+            except Exception as e:
+                print(f"Error cleaning up temporary directory {temp_dir}: {e}")
+                # Log this error, but don't block the response.
 
 @app.route('/evaluate', methods=["GET"])
 def show_evaluation_page():
