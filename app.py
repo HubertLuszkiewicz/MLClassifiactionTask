@@ -5,7 +5,7 @@ import tempfile # For creating temporary directories
 import json # For saving class names
 import numpy as np
 import io # Make sure this is imported
-# Assume necessary imports for TensorFlow and Keras are available
+from sklearn.metrics import classification_report, confusion_matrix
 import tensorflow as tf
 from tensorflow.keras.models import Model, load_model # Need Model for building, load_model if loading base from file
 from tensorflow.keras.applications import ResNet50 # Or other base model
@@ -14,7 +14,6 @@ from tensorflow.keras.layers import Dense, GlobalAveragePooling2D # Layers for t
 from tensorflow.keras.optimizers import Adam # Optimizer
 from tensorflow.keras.losses import CategoricalCrossentropy # Loss function
 from tensorflow.keras.preprocessing import image_dataset_from_directory # Data loading utility
-from sklearn.metrics import classification_report, confusion_matrix
 from tensorflow.keras.utils import load_img, img_to_array
 
 def build_finetuned_model(num_classes, base_model_architecture='ResNet50', input_shape=(224, 224, 3)):
@@ -22,16 +21,9 @@ def build_finetuned_model(num_classes, base_model_architecture='ResNet50', input
 
     # --- 1. Load the pre-trained base model ---
     if base_model_architecture == 'ResNet50':
-        # weights='imagenet': Use ImageNet weights
-        # include_top=False: Crucially, remove the original 1000-class top layer
         base_model = ResNet50(weights='imagenet', include_top=False, input_shape=input_shape)
-        # You might load a pre-trained ResNet18 if you have its weights file
-        # base_model = load_model('/path/to/your/resnet18_base.h5', compile=False) # Example if saving just the base
-
-        # Freeze the base model layers initially for phase 1 training
         for layer in base_model.layers:
             layer.trainable = False
-    # Add elif for other architectures if needed
     else:
         raise ValueError(f"Unsupported base model architecture: {base_model_architecture}")
 
@@ -40,8 +32,6 @@ def build_finetuned_model(num_classes, base_model_architecture='ResNet50', input
     # --- 2. Add new classification layers on top ---
     x = base_model.output
     x = GlobalAveragePooling2D()(x) # Global pooling before dense layers
-    # Add a dropout layer for regularization if needed
-    # x = tf.keras.layers.Dropout(0.5)(x)
     predictions = Dense(num_classes, activation='softmax')(x) # Final dense layer with NUM_CLASSES units
 
     # --- 3. Create the full model ---
@@ -50,31 +40,14 @@ def build_finetuned_model(num_classes, base_model_architecture='ResNet50', input
     print("Fine-tuned model architecture created.")
     return model
 
+
 def load_model_from_file(model_path):
-    """
-    Loads a Keras model from the specified file path.
-
-    Args:
-        model_path (str): The path to the saved model file (.h5, .keras)
-                          or the directory (SavedModel format).
-
-    Returns:
-        tf.keras.Model or None: The loaded model object, or None if loading failed.
-    """
     print(f"Attempting to load model from: {model_path}")
     if not os.path.exists(model_path): # os needs to be imported
         print(f"Error: Model file/directory not found at {model_path}")
         return None
 
     try:
-        # Use tf.keras.models.load_model
-        # compile=False is often useful if you only need inference/evaluation
-        # and don't need the original optimizer or loss function setup.
-        # custom_objects is needed if your model architecture includes custom layers
-        # that are not built-in Keras layers.
-        # model = load_model(model_path, compile=False, custom_objects={'YourCustomLayer': YourCustomLayer})
-
-        # For a standard ResNet50 without custom layers, compile=False is sufficient
         model = load_model(model_path, compile=False)
 
         print("Model loaded successfully.")
@@ -82,20 +55,22 @@ def load_model_from_file(model_path):
 
     except Exception as e:
         print(f"Error loading model from {model_path}: {e}")
-        # This could happen due to file corruption, incompatibility, missing custom objects, etc.
         return None
     
 
 app = Flask(__name__)
 MODEL_SAVE_DIR = 'trained_models'
 
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
+
 @app.route('/train', methods=["GET"])
 def show_training_page():
     return render_template('train_model.html')
+
 
 @app.route('/train', methods=["POST"])
 def train_model():
@@ -110,10 +85,6 @@ def train_model():
         print("Attempting to receive and save training data folder...") # Debug print
         try:
             training_files = request.files.getlist('trainingData')
-            # We also expect a selected model path (for the base model to fine-tune)
-            # This might come from a separate dropdown for base models or be hardcoded
-            # For simplicity, let's assume we are fine-tuning a standard ResNet50 ImageNet here.
-            # If you need to select a base model file, you'd add an input for it.
 
             if not training_files:
                 print("Error: No training data files received.") # Debug print
@@ -123,7 +94,6 @@ def train_model():
             print(f"Saving {len(training_files)} training files to temporary directory: {temp_dir}") # Debug print
 
             for file_storage in training_files:
-                # file_storage.filename contains the relative path (e.g., 'my_dataset/class_a/image.jpg')
                 save_path = os.path.join(temp_dir, file_storage.filename)
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 file_storage.save(save_path)
@@ -134,8 +104,6 @@ def train_model():
             print(f"Error during training data reception or saving: {e}")
             return jsonify({"error": f"Error receiving or saving training data files: {e}"}), 500
 
-        # --- Find the root directory within the temporary directory ---
-        # (Similar logic as in evaluate_model)
         dataset_root_in_temp = None
         try:
             items_in_temp_dir = os.listdir(temp_dir)
@@ -156,12 +124,10 @@ def train_model():
         # 2. Create Training and Validation Datasets
         print("Attempting to create training and validation datasets...") # Debug print
         try:
-            # image_dataset_from_directory for training data
-            # Use a validation_split and subset for creating train/validation sets
             train_ds = image_dataset_from_directory(
                 dataset_root_in_temp, # Point to the identified root folder
                 labels='inferred',
-                label_mode='categorical', # Or 'int', match your model's expected output
+                label_mode='categorical',
                 image_size=(224, 224), # Match model input size
                 batch_size=32,
                 shuffle=True,
@@ -250,49 +216,12 @@ def train_model():
              print(f"Error during Phase 1 training: {e}")
              return jsonify({"error": f"Error during model training (Phase 1): {e}"}), 500
 
-        # --- Optional: Phase 2 Fine-tuning ---
-        # This takes longer and requires more resources. You might skip it
-        # or make it optional via the UI for simplicity initially.
-        # If you include it, remember to unfreeze layers and re-compile with a lower LR.
-
-        # print("Starting Phase 2 fine-tuning...")
-        # try:
-        #     # Unfreeze base model layers (or parts of it)
-        #     for layer in model.layers[0].layers: # model.layers[0] is the base_model
-        #         layer.trainable = True
-        #     print("Base model layers unfrozen.")
-
-        #     # Re-compile with lower learning rate
-        #     model.compile(
-        #         optimizer=Adam(learning_rate=1e-5), # Lower learning rate
-        #         loss=CategoricalCrossentropy(),
-        #         metrics=['accuracy']
-        #     )
-        #     print("Model compiled for Phase 2.")
-
-        #     history_phase2 = model.fit(
-        #         train_ds,
-        #         epochs=5 + 5, # Total epochs (Phase 1 + Phase 2)
-        #         initial_epoch=5, # Start from end of Phase 1
-        #         validation_data=val_ds,
-        #         verbose=1
-        #     )
-        #     print("Phase 2 fine-tuning finished.")
-
-        # except Exception as e:
-        #      print(f"Error during Phase 2 fine-tuning: {e}")
-        #      return jsonify({"error": f"Error during model fine-tuning (Phase 2): {e}"}), 500
-        # --- End Optional Phase 2 ---
-
-
         # 6. Save the Trained Model and Class Names
         print("Attempting to save trained model and class names...") # Debug print
         try:
             # Ensure the save directory exists
             os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
-            # Define a name for the saved model (e.g., timestamp or user-provided name)
-            # For now, let's use a simple name or include a timestamp
             import time
             timestamp = int(time.time())
             model_save_name = f'finetuned_model_{timestamp}.keras' # Or .h5
@@ -308,15 +237,10 @@ def train_model():
                  json.dump(class_names, f)
             print(f"Class names mapping saved to {class_names_save_path}") # Debug print
 
-            # You might want to store info about the saved model (path, name, class_names path)
-            # in a database or a manifest file if you have many models.
-            # For now, we just print paths.
-
             training_status['status'] = 'success'
             training_status['message'] = 'Model training completed successfully!'
             training_status['saved_model_path'] = model_save_path
             training_status['saved_class_names_path'] = class_names_save_path
-            # Include final metrics if you want (e.g., from history_phase1.history)
 
             # 7. Return success response with paths to saved files
             print("Returning training success response.") # Debug print
@@ -330,7 +254,6 @@ def train_model():
             return jsonify(training_status), 500 # Return 500 as it's a server error
 
     except Exception as e:
-        # This catches errors that happen very early (e.g., tempfile, initial file receiving)
         print(f"An unexpected error occurred during initial training processing: {e}") # Debug print
         training_status['status'] = 'error'
         training_status['message'] = f'An unexpected server error occurred during initial processing: {e}'
@@ -347,9 +270,11 @@ def train_model():
                 print(f"Error cleaning up temporary directory {temp_dir}: {e}")
                 # Log this error, but don't block the response.
 
+
 @app.route('/evaluate', methods=["GET"])
 def show_evaluation_page():
     return render_template('evaluate_model.html')
+
 
 @app.route('/evaluate', methods=["POST"])
 def evaluate_model():
@@ -371,8 +296,6 @@ def evaluate_model():
                 print("Error: No test data files received.") # Debug print
                 return jsonify({"error": "No test data files received."}), 400
 
-            # Create a temporary directory unique to this request
-            # The 'dir' parameter could restrict temp directories to a specific parent
             temp_dir = tempfile.mkdtemp(prefix='test_eval_')
             print(f"Saving {len(test_files)} test files to temporary directory: {temp_dir}") # Debug print
 
@@ -420,9 +343,7 @@ def evaluate_model():
             if not selected_model_path:
                 print("Error: No model path selected.") # Debug print
                 return jsonify({"error": "No model path selected."}), 400
-
-            # IMPORTANT SECURITY/VALIDATION: Check if the model path is safe!
-            # Ensure path is within MODEL_SAVE_DIR.
+            
             abs_model_save_dir = os.path.abspath(MODEL_SAVE_DIR)
             abs_selected_model_path = os.path.abspath(selected_model_path)
 
@@ -438,8 +359,6 @@ def evaluate_model():
             # Use your load_model_from_file function - It should load with compile=False
             model = load_model_from_file(abs_selected_model_path) # Assuming this function handles its own basic printing
             if model is None:
-                 # load_model_from_file should print details about the load failure
-                 # Its own error message is often sufficient, but adding a generic one here
                  print("load_model_from_file returned None.") # Debug print
                  return jsonify({"error": f"Failed to load model from {selected_model_path}. Check server logs for details."}), 500 # Use 500 for server error
 
@@ -465,8 +384,6 @@ def evaluate_model():
                 shuffle=False # Don't shuffle evaluation data for consistent results
             )
 
-            # 2. Check if any classes were inferred. This can fail if the dataset_root_in_temp
-            # doesn't contain valid class subdirectories with images.
             if not raw_test_ds.class_names:
                  print("Error: No classes inferred from test data folders.") # Debug print
                  return jsonify({"error": "No valid image files found in class subfolders within the uploaded test data. Ensure structure is class_name/image.jpg"}), 400 # Use 400 for bad client data
@@ -476,16 +393,11 @@ def evaluate_model():
             print(f"Test dataset inferred classes: {test_dataset_class_names}") # Debug print
             print(f"Inferred {len(test_dataset_class_names)} classes.") # Debug print
 
-            # --- Validate Class Count vs. Model Output Shape ---
-            # Check if the number of inferred classes matches the model's expected output shape.
-            # This requires knowing the model's output shape. Assuming model output layer is Dense.
-            # model.output_shape will be (None, num_classes)
             if model is not None and model.output_shape[-1] != len(test_dataset_class_names):
                  print(f"Error: Model expects {model.output_shape[-1]} classes, but inferred {len(test_dataset_class_names)} classes from test data.")
                  return jsonify({"error": f"Model expects {model.output_shape[-1]} classes, but uploaded test data contains {len(test_dataset_class_names)} classes based on folder names. Class count mismatch."}), 400 # Use 400
 
             # 4. Apply the necessary transformations and optimizations
-            # Use raw_test_ds.map, raw_test_ds.cache, raw_test_ds.prefetch
             test_ds = raw_test_ds.map(lambda x, y: (preprocess_input(x), y), num_parallel_calls=tf.data.AUTOTUNE)
             test_ds = test_ds.cache().prefetch(buffer_size=tf.data.AUTOTUNE) # This is the _PrefetchDataset
 
@@ -500,11 +412,10 @@ def evaluate_model():
         # 5. Compile the Model for Evaluation
         print("Attempting to compile model for evaluation...") # Debug print
         try:
-            # Re-compile the model. Need a loss and metrics.
-            # Match the loss type (CategoricalCrossentropy for categorical labels).
+
             model.compile(
-                optimizer=Adam(), # Optimizer instance is required but its state isn't used by evaluate
-                loss=CategoricalCrossentropy(), # Use the class instance if imported, or string 'categorical_crossentropy'
+                optimizer=Adam(), 
+                loss=CategoricalCrossentropy(), 
                 metrics=['accuracy'] # Include 'accuracy' or other metrics you want evaluated
             )
             print("Model compiled for evaluation.") # Debug print
@@ -529,9 +440,6 @@ def evaluate_model():
             evaluation_metrics['core_metrics'] = dict(zip(model.metrics_names, results_from_evaluate))
             print("Core evaluation metrics:", evaluation_metrics['core_metrics']) # Debug print
 
-
-            # --- Calculate detailed metrics (Precision, Recall, F1, Confusion Matrix) ---
-            # This part doesn't strictly *require* compile(), but often done together
             print("Calculating detailed metrics...") # Debug print
 
             # Get true labels (integer indices). Iterate over the *final* optimized test_ds.
@@ -544,9 +452,6 @@ def evaluate_model():
             if test_ds.element_spec[1].shape[-1] > 1 and true_labels_int.ndim > 1:
                  true_labels_int = np.argmax(true_labels_int, axis=1)
 
-
-            # Get predictions (raw output, e.g., probabilities from softmax)
-            # Iterate over the *final* optimized test_ds to get predictions
             print("Getting model predictions for detailed metrics...") # Debug print
             # Use model.predict on the dataset - Keras handles batching
             predictions_raw = model.predict(test_ds)
@@ -559,8 +464,6 @@ def evaluate_model():
             # Use the class names inferred from the test dataset for metrics reporting
             sorted_class_labels = test_dataset_class_names # Use the variable obtained earlier
 
-            # Calculate Classification Report
-            # zero_division=0 handles potential cases with no true/predicted samples for a class gracefully
             report = classification_report(true_labels_int, predicted_labels_int, target_names=sorted_class_labels, output_dict=True, zero_division=0)
             evaluation_metrics['classification_report'] = report
             print("Classification report calculated.") # Debug print
@@ -576,7 +479,6 @@ def evaluate_model():
 
             evaluation_metrics['status'] = 'success' # Update overall status
 
-
             # 7. Return results as JSON
             print("Returning evaluation metrics as JSON.") # Debug print
             return jsonify(evaluation_metrics)
@@ -587,8 +489,6 @@ def evaluate_model():
 
 
     except Exception as e:
-        # This catches errors that might happen *very* early, before specific blocks
-        # (e.g., issues with tempfile.mkdtemp itself, initial file reading before saving loop starts)
         print(f"An unexpected error occurred during initial processing: {e}") # Debug print
         return jsonify({"error": f"An unexpected server error occurred during initial processing: {e}"}), 500 # Use 500
 
@@ -604,6 +504,7 @@ def evaluate_model():
                 print(f"Error cleaning up temporary directory {temp_dir}: {e}")
                 # Log this error, but don't block the response.
                 
+
 @app.route('/list_models', methods=['GET'])
 def list_available_models():
     models_list = []
@@ -615,15 +516,15 @@ def list_available_models():
 
     return jsonify(models_list)
 
+
 @app.route("/classify", methods=["GET"])
 def show_classification_page():
     return render_template('classify_image.html')
 
+
 @app.route("/classify", methods=["POST"])
 def get_prediction():
     print("--- Received POST request to /classify ---") # Debug print
-
-    # --- No longer checking global default model/class names here ---
 
     # 1. Get the selected model path from the form data
     print("Attempting to get selected model path from form...") # Debug print
@@ -638,12 +539,9 @@ def get_prediction():
     model = None # Initialize model variable
     print(f"Attempting to load model from: {selected_model_path}") # Debug print
     try:
-        # IMPORTANT SECURITY/VALIDATION: Check if the model path is safe!
-        # Ensure path is within MODEL_SAVE_DIR to prevent directory traversal attacks.
         abs_model_save_dir = os.path.abspath(MODEL_SAVE_DIR)
         abs_selected_model_path = os.path.abspath(selected_model_path)
 
-        # Check if the absolute path of the selected model starts with the absolute path of the models directory
         if not abs_selected_model_path.startswith(abs_model_save_dir):
              print(f"SECURITY ALERT: Attempted to load model outside MODEL_SAVE_DIR: {selected_model_path}")
              return jsonify({"error": "Invalid model path specified."}), 400 # Use 400 for bad client input
@@ -652,8 +550,6 @@ def get_prediction():
             print(f"Model file not found at expected server path: {selected_model_path}") # Debug print
             return jsonify({"error": f"Model file not found at server path: {selected_model_path}. Check model selection."}), 404 # Use 404 if resource not found
 
-        # Use your load_model_from_file function - It should handle basic loading errors
-        # Note: load_model_from_file itself should ideally use compile=False
         model = load_model_from_file(abs_selected_model_path)
         if model is None:
              # load_model_from_file should print details about the load failure to server logs
@@ -671,13 +567,7 @@ def get_prediction():
     print("Attempting to load class names mapping...") # Debug print
     class_names = None # Initialize class names variable
     try:
-        # Assume class_names.json is saved in the same directory as the model file
         model_dir = os.path.dirname(abs_selected_model_path)
-        # --- ADJUST THIS LOGIC TO FIND THE CORRECT class_names.json FILE ---
-        # This is a common point of error if the naming convention is complex or inconsistent.
-        # A more robust approach: include class_names_path in /list_models JSON response.
-
-        # Example logic assuming pattern like model_XXX.keras and class_names_XXX.json
         model_filename = os.path.basename(abs_selected_model_path) # e.g., finetuned_model_1750259108.keras
         class_names_filename = None
 
@@ -692,7 +582,6 @@ def get_prediction():
         # Add more elif for other formats if needed
         else:
              print(f"Warning: Model filename '{model_filename}' doesn't end with .keras or .h5. Cannot infer class names filename based on pattern.") # Debug print
-             # Handle models saved in SavedModel format (directories) - class_names.json might be at the root of the directory
              if os.path.isdir(abs_selected_model_path):
                   class_names_filename = 'class_names.json' # Common name within SavedModel dir
 
@@ -731,11 +620,7 @@ def get_prediction():
 
     file = request.files['image'] # Get the FileStorage object
 
-
-    # Define the target image size (must match what your model expects)
-    # *** ADJUST THIS IF YOUR MODEL EXPECTS A DIFFERENT SIZE ***
     TARGET_IMAGE_SIZE = (224, 224)
-
 
     # --- 5. Process the image and get prediction ---
     print(f"Processing image: {file.filename}") # Debug print
@@ -745,8 +630,6 @@ def get_prediction():
         # Wrap the bytes in an io.BytesIO object, which load_img understands
         image_stream = io.BytesIO(image_bytes)
 
-        # Load the image from the io.BytesIO stream and resize it
-        # Make sure Pillow is installed: pip install Pillow
         img = load_img(image_stream, target_size=TARGET_IMAGE_SIZE)
         print("Image loaded and resized.") # Debug print
 
@@ -758,25 +641,18 @@ def get_prediction():
         img_array_batched = np.expand_dims(img_array, axis=0)
         print(f"Added batch dimension, shape: {img_array_batched.shape}") # Debug print
 
-        # Apply the model's preprocessing (scaling, centering, etc.)
-        # *** MAKE SURE preprocess_input MATCHES YOUR MODEL ARCHITECTURE (ResNet50) ***
         processed_image_array = preprocess_input(img_array_batched)
         print("Image preprocessing complete.") # Debug print
 
         # Make a prediction
-        # model.predict returns a numpy array of shape (batch_size, num_classes)
         print("Getting model prediction...") # Debug print
         predictions_raw = model.predict(processed_image_array) # Use the loaded 'model'
         print("Prediction obtained.") # Debug print
-        # For a single image input, predictions_raw will have shape (1, num_classes)
-
 
         # Get the predicted class index (index with the highest probability)
         predicted_index = np.argmax(predictions_raw[0]) # [0] because batch size is 1
         print(f"Predicted index: {predicted_index}") # Debug print
 
-        # Get the predicted class name using the loaded mapping (class_names)
-        # Ensure predicted_index is within the bounds of the class_names list
         if 0 <= predicted_index < len(class_names): # Use the local 'class_names' variable
              predicted_label = class_names[predicted_index]
              print(f"Predicted label: {predicted_label}") # Debug print
@@ -784,12 +660,8 @@ def get_prediction():
              # This indicates a mismatch in the number of classes between the model output and the class_names file
              predicted_label = "Unknown (Index out of bounds)"
              print(f"Error: Predicted index {predicted_index} is out of bounds for loaded class names list with {len(class_names)} classes.") # Debug print
-             # Consider returning an error here instead of a successful response with "Unknown" if this is critical
-             # return jsonify({"error": "Class index mismatch between model output and class names mapping."}), 500
-
 
         # Get the confidence score for the top prediction
-        # np.max finds the maximum value (the highest probability)
         confidence = float(np.max(predictions_raw[0])) # Use float() for JSON serialization
         print(f"Confidence: {confidence:.4f}") # Debug print with formatting
 

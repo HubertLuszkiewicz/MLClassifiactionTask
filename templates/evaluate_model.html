@@ -104,11 +104,6 @@
              text-align: center;
          }
 
-        /* Usuwamy style specyficzne dla podglądu obrazka */
-        /* #imagePreview { ... } */
-        /* #imagePreview img { ... } */
-        /* img { ... } */
-
     </style>
 </head>
 <body>
@@ -123,19 +118,11 @@
         <select id="modelSelect" name="modelPath" required>
             <!-- Opcje będą dynamicznie dodane przez backend -->
             <option value="">-- Loading models... --</option>
-            <!-- Przykładowa opcja (usunięta/zastąpiona przez backend) -->
-            <!-- <option value="path/to/your/model.h5">My Trained Model v1</option> -->
         </select>
 
         <!-- Test Data Folder Input -->
         <label for="testDataFolder">Select Test Data Folder:</label>
         <input type="file" id="testDataFolder" name="testData" webkitdirectory directory accept="image/*" required>
-
-        <!-- REMOVED: Label and Input for Labels CSV -->
-        <!--
-        <label for="labels">Select labels for Test Data:</label>
-        <input type="file" id="labels" name="labels" accept=".csv" required>
-        -->
 
         <button type="submit">Evaluate Model</button>
     </form>
@@ -264,8 +251,6 @@
             } catch (error) {
                 console.error('Error during evaluation:', error);
                 loadingIndicator.style.display = 'none';
-                // The NetworkError message is not very user-friendly, use a generic one
-                // metricsDisplayPre.textContent = `Error: ${error.message}`; // Original line causing NetworkError text
                 metricsDisplayPre.textContent = 'Error: Could not connect to the server or server error during evaluation. Please check server logs.';
                 evaluationResultDiv.style.display = 'block';
             }

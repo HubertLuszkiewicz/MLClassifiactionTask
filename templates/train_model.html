@@ -82,11 +82,6 @@
             color: #007bff; /* Blue color for status text */
         }
 
-        /* Remove specific image preview styles as they are not needed */
-        /* #imagePreview { ... } */
-        /* #imagePreview img { ... } */
-        /* img { ... } */
-
     </style>
 </head>
 <body>
@@ -98,20 +93,6 @@
         <!-- Training Data Input (Folder) -->
         <label for="trainingDataFolder">Select Training Data Folder:</label>
         <input type="file" id="trainingDataFolder" name="trainingData" webkitdirectory directory accept="image/*" required>
-
-        <!-- REMOVED: Input for Labels CSV -->
-        <!--
-        <label for="labels">Select labels for Training Data:</label>
-        <input type="file" id="labels" name="labels" accept=".csv" required>
-        -->
-
-        <!-- REMOVED: Input for Model Selection -->
-        <!--
-        <label for="modelSelect">Select Model to Train:</label>
-        <select id="modelSelect" name="modelPath" required>
-            <option value="">-- Loading models... --</option>
-        </select>
-        -->
 
         <button type="submit">Start Training</button>
     </form>
@@ -129,14 +110,7 @@
         const trainingStatusDiv = document.getElementById('trainingStatus');
         const statusText = document.getElementById('statusText');
         const logOutput = document.getElementById('logOutput');
-        // const modelSelect = document.getElementById('modelSelect'); // Removed
 
-
-        // --- REMOVED: Function to fetch and populate model list ---
-        // async function fetchModels() { ... }
-        // REMOVED: fetchModels() call on page load
-
-        // --- Event Listeners ---
         // Optional: Clear results when training data folder changes
         const trainingDataFolderInput = document.getElementById('trainingDataFolder');
         trainingDataFolderInput.addEventListener('change', function() {
@@ -175,25 +149,14 @@
                  // Assuming backend returns JSON status/logs
                 const result = await response.json(); // Attempt to parse JSON even on non-OK response
 
-                // Hide loading indicator (if you add one to this page)
-                // loadingIndicator.style.display = 'none';
-
-                // Check if the response is OK (status code 2xx)
                 if (!response.ok) {
                     // If response is not OK, treat the JSON body as an error message
                     const errorMsg = result.error || `HTTP error! status: ${response.status} - ${response.statusText}`;
                     throw new Error(errorMsg);
                 }
 
-
-                // --- Update status and logs based on backend response ---
-                // Assuming backend returns { status: 'success', message: '...', saved_model_path: '...', ... } on success
                 statusText.textContent = result.status || 'Training process updated.'; // Use status from backend
                 logOutput.textContent = result.message || 'Training started successfully.'; // Use message from backend
-
-                // If backend sends continuous updates (requires WebSockets or polling),
-                // you'd need more complex JS here to append logs.
-                // For a single JSON response at the end, just displaying the message is fine.
 
                 // Example: Append saved paths on success
                  if (result.saved_model_path) {
@@ -206,14 +169,11 @@
 
             } catch (error) {
                 console.error('Error during fetch request or backend processing:', error);
-                // Hide loading indicator (if you add one to this page)
-                // loadingIndicator.style.display = 'none';
 
                 // Display the error message received from the backend or the fetch error
                 statusText.textContent = 'Training failed.';
                 logOutput.textContent = `Error: ${error.message}`;
             }
-             // No need for simulated updates now if backend returns final status
 
         });
     </script>
