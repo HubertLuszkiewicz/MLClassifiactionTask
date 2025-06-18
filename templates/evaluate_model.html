@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Model Evaluation (Test Set)</title>
+    <style>
+        /* Ogólny styl body z Twojego przykładu */
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+        }
+
+        /* Styl kontenera formularza z Twojego przykładu */
+        form {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 5px;
+        }
+
+        /* Styl etykiet z Twojego przykładu */
+        label {
+            display: block;
+            margin-bottom: 8px; /* Lekko zmniejszone */
+            font-weight: bold;
+            color: #333;
+        }
+
+         /* Styl dla input typu file */
+        input[type="file"] {
+             margin-bottom: 15px; /* Dopasowanie do innych inputów */
+        }
+
+        /* Styl dla input typu text i select */
+        input[type="text"],
+        select {
+            display: block;
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+
+
+        /* Styl przycisku z Twojego przykładu */
+        button {
+            padding: 10px 15px;
+            margin-top: 10px; /* Dodany odstęp */
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        /* Styl obszaru wyników oceny */
+        #evaluationResult {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #eee;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            display: none;
+        }
+
+        #evaluationResult h2 {
+            margin-top: 0;
+            color: #333;
+        }
+
+        #metricsDisplay {
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            background-color: #fff;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+            border-radius: 4px;
+            color: #555;
+            font-size: 0.9rem;
+        }
+
+         /* Styl wskaźnika ładowania */
+         #loadingIndicator {
+             display: none;
+             margin-top: 15px;
+             padding: 10px;
+             background-color: #e9f5ff;
+             border: 1px solid #b3e0ff;
+             border-radius: 5px;
+             color: #0056b3;
+             font-weight: bold;
+             text-align: center;
+         }
+
+        /* Usuwamy style specyficzne dla podglądu obrazka */
+        /* #imagePreview { ... } */
+        /* #imagePreview img { ... } */
+        /* img { ... } */
+
+    </style>
+</head>
+<body>
+
+    <h1>Model Evaluation</h1>
+    <p>Select a trained model and upload your test dataset folder to evaluate its performance.</p>
+
+    <form id="evaluationForm" action="/evaluate" method="post" enctype="multipart/form-data">
+
+        <!-- Opcja wyboru modelu -->
+        <label for="modelSelect">Select Trained Model:</label>
+        <select id="modelSelect" name="modelPath" required>
+            <!-- Opcje będą dynamicznie dodane przez backend -->
+            <option value="">-- Loading models... --</option>
+            <!-- Przykładowa opcja (usunięta/zastąpiona przez backend) -->
+            <!-- <option value="path/to/your/model.h5">My Trained Model v1</option> -->
+        </select>
+
+        <!-- Test Data Folder Input -->
+        <label for="testDataFolder">Select Test Data Folder:</label>
+        <input type="file" id="testDataFolder" name="testData" webkitdirectory directory accept="image/*" required>
+
+        <button type="submit">Evaluate Model</button>
+    </form>
+
+    <div id="loadingIndicator">
+        Processing test data and evaluating model... This may take a while for large datasets.
+    </div>
+
+    <div id="evaluationResult">
+        <h2>Evaluation Metrics:</h2>
+        <pre id="metricsDisplay"></pre>
+    </div>
+
+    <script>
+        const form = document.getElementById('evaluationForm');
+        const modelSelect = document.getElementById('modelSelect'); // Now also get the model select element
+        const testDataFolderInput = document.getElementById('testDataFolder');
+        const evaluationResultDiv = document.getElementById('evaluationResult');
+        const metricsDisplayPre = document.getElementById('metricsDisplay');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        // --- Function to fetch and populate model list ---
+        async function fetchModels() {
+            try {
+                // Make a GET request to a backend endpoint that lists models
+                const response = await fetch('/list_models'); // <--- You need to create this endpoint in Flask!
+
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorBody.error || response.statusText}`);
+                }
+
+                const models = await response.json(); // Assume backend returns JSON like ["model1.h5", "model2.h5"]
+
+                // Clear current options
+                modelSelect.innerHTML = '';
+
+                if (models.length === 0) {
+                    modelSelect.innerHTML = '<option value="">-- No models found --</option>';
+                    modelSelect.disabled = true; // Disable if no models
+                     // Also disable the submit button if no models
+                     form.querySelector('button[type="submit"]').disabled = true;
+
+                } else {
+                     // Add a default option
+                     const defaultOption = document.createElement('option');
+                     defaultOption.value = "";
+                     defaultOption.textContent = "-- Select a model --";
+                     modelSelect.appendChild(defaultOption);
+
+
+                    // Add options for each model received
+                    models.forEach(model => {
+                        const option = document.createElement('option');
+                        // The 'value' should be what your backend needs to load the model
+                        // This could be the full path, a relative path, or just an ID
+                        option.value = model.path; // Assuming backend provides 'path' and 'name'
+                        option.textContent = model.name; // Assuming backend provides a 'name' for display
+                        modelSelect.appendChild(option);
+                    });
+                    modelSelect.disabled = false; // Enable the select dropdown
+                    form.querySelector('button[type="submit"]').disabled = false; // Enable submit button
+                }
+
+            } catch (error) {
+                console.error('Error fetching models:', error);
+                modelSelect.innerHTML = '<option value="">-- Error loading models --</option>';
+                modelSelect.disabled = true; // Disable on error
+                 form.querySelector('button[type="submit"]').disabled = true; // Disable submit button
+            }
+        }
+
+        // Fetch models when the page loads
+        fetchModels();
+
+        // --- Event Listeners ---
+        // Clear results when folder or model selection changes
+         testDataFolderInput.addEventListener('change', function() {
+            evaluationResultDiv.style.display = 'none';
+            metricsDisplayPre.textContent = '';
+            // loadingIndicator.style.display = 'none'; // Keep loading indicator if previous fetch is running
+        });
+
+         modelSelect.addEventListener('change', function() {
+            evaluationResultDiv.style.display = 'none';
+            metricsDisplayPre.textContent = '';
+            // loadingIndicator.style.display = 'none';
+        });
+
+
+        // --- Form Submission Logic ---
+        form.addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            // Basic validation: check if a model is selected and test data is provided
+            if (modelSelect.value === "") {
+                 alert("Please select a model to evaluate.");
+                 return;
+            }
+
+             const testFiles = testDataFolderInput.files; // Get files from input
+             if (testFiles.length === 0) {
+                 alert("Please select a test data folder.");
+                 return;
+             }
+
+
+            // Ukrywamy poprzednie wyniki i pokazujemy wskaźnik ładowania
+            evaluationResultDiv.style.display = 'none';
+            metricsDisplayPre.textContent = '';
+            loadingIndicator.style.display = 'block';
+
+             const formData = new FormData(form); // Collect form data (includes modelPath and testData files)
+
+             console.log(`Selected model: ${formData.get('modelPath')}`);
+             console.log(`Selected ${testFiles.length} files from test data folder.`);
+
+
+            try {
+                // Wysyłamy dane formularza do endpointu na backendzie
+                const response = await fetch('/evaluate', { // <-- Endpoint na backendzie do oceny
+                    method: 'POST',
+                    body: formData // Zawiera modelPath i testData
+                });
+
+                // Ukrywamy wskaźnik ładowania
+                loadingIndicator.style.display = 'none';
+
+                // Sprawdzamy czy odpowiedź jest OK (status 2xx)
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorBody.error || response.statusText}`);
+                }
+
+                const result = await response.json(); // Backend powinien zwrócić JSON z metrykami oceny
+
+                 metricsDisplayPre.textContent = JSON.stringify(result, null, 2);
+                 evaluationResultDiv.style.display = 'block';
+
+            } catch (error) {
+                console.error('Error during evaluation:', error);
+                loadingIndicator.style.display = 'none';
+                metricsDisplayPre.textContent = `Error: ${error.message}`;
+                evaluationResultDiv.style.display = 'block';
+            }
+        });
+    </script>
+
+</body>
+</html>

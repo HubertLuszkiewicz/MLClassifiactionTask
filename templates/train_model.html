@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Model Training Data Input</title>
+    <style>
+        /* General body styling from your example */
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+        }
+
+        /* Form container styling from your example */
+        form {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 5px;
+        }
+
+        /* Label styling from your example */
+        label {
+            display: block;
+            margin-bottom: 10px; /* Match original page margin */
+            font-weight: bold;
+        }
+
+        /* Styling for file input */
+        input[type="file"] {
+             margin-bottom: 20px; /* Match original page margin */
+        }
+
+        /* Button styling from your example */
+        button {
+            padding: 10px 15px;
+            margin-top: 5px; /* Match original page margin */
+            background-color: #007bff; /* Blue color */
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            display: block;
+        }
+
+        button:hover {
+            background-color: #0056b3; /* Darker blue on hover */
+        }
+
+        /* Styling for the status/results area (similar to original #result) */
+        #trainingStatus { /* Renamed from #result */
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #eee;
+            background-color: #f9f9f9;
+            border-radius: 5px; /* Match form radius */
+            display: none; /* Hide initially */
+        }
+
+         #trainingStatus h2 {
+            margin-top: 0; /* Remove default h2 top margin */
+            color: #333;
+        }
+
+        #logOutput {
+             /* Style for displaying logs or detailed output */
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            background-color: #fff;
+            font-family: monospace; /* Monospaced font for logs */
+            white-space: pre-wrap; /* Respect whitespace but wrap long lines */
+            word-wrap: break-word; /* Break words if necessary */
+            max-height: 300px; /* Optional: limit height for long logs */
+            overflow-y: auto; /* Add scrollbar if content exceeds max-height */
+            border-radius: 4px;
+            color: #555;
+            font-size: 0.9rem; /* Slightly smaller font for logs */
+        }
+
+        #statusText {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #007bff; /* Blue color for status text */
+        }
+
+        /* Remove specific image preview styles as they are not needed */
+        /* #imagePreview { ... } */
+        /* #imagePreview img { ... } */
+        /* img { ... } */
+
+    </style>
+</head>
+<body>
+
+    <h1>Upload Data for Model Training</h1>
+    <p>Please upload your training dataset</p>
+
+    <form id="trainingForm" action="/start_training" method="post" enctype="multipart/form-data">
+        <!-- Training Data Input -->
+        <label for="trainingDataFile">Select Training Data:</label>
+        <!-- Consider adding 'accept' attribute if you expect specific file types -->
+        <input type="file" id="trainingDataFile" name="trainingData" webkitdirectory directory accept="image/*" required>
+        
+        <label for="labels">Select labels for Training Data:</label>
+        <input type="file" id="labels" name="labels" accept=".csv" required>
+
+        <button type="submit">Start Training</button>
+    </form>
+
+    <div id="trainingStatus">
+        <h2>Training Status:</h2>
+         <p id="statusText">Waiting for training to start...</p>
+        <pre id="logOutput">Log output will appear here.</pre>
+    </div>
+
+    <script>
+        // Basic JavaScript to handle form submission and show/update the status area.
+        // A real application would use fetch/XMLHttpRequest to send data
+        // and likely update the status area with real-time logs via WebSockets
+        // or polling.
+
+        const trainingForm = document.getElementById('trainingForm');
+        const trainingStatusDiv = document.getElementById('trainingStatus');
+        const statusText = document.getElementById('statusText');
+        const logOutput = document.getElementById('logOutput');
+
+        trainingForm.addEventListener('submit', function(event) {
+            event.preventDefault(); // Prevent the default form submission
+
+            const formData = new FormData(trainingForm); // Get form data, including files
+
+            // For demonstration: Show the status area and update text
+            trainingStatusDiv.style.display = 'block';
+            statusText.textContent = 'Uploading data and initiating training...';
+            logOutput.textContent = 'Sending files to server...';
+
+            // --- Placeholder for actual API call and status updates ---
+            // Example using fetch API:
+            // fetch('/start_training', { // Or your specific backend endpoint
+            //     method: 'POST',
+            //     body: formData // FormData handles file uploads
+            // })
+            // .then(response => {
+            //     if (!response.ok) {
+            //         // Attempt to read error message from body if available
+            //         return response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+            //     }
+            //     // Assuming backend returns JSON status/logs
+            //     return response.json();
+            // })
+            // .then(data => {
+            //     if (data.error) {
+            //         statusText.textContent = 'Error starting training.';
+            //         logOutput.textContent = `Server responded with error: ${data.error}`;
+            //         console.error('Server Error:', data.error);
+            //     } else {
+            //          // Update status and logs based on backend response
+            //          statusText.textContent = data.status || 'Training started successfully.';
+            //          logOutput.textContent = data.message || 'Training process initiated.';
+            //          // You might need a separate mechanism (like polling or WebSockets)
+            //          // to continuously fetch logs/progress updates during training.
+            //     }
+            // })
+            // .catch(error => {
+            //     statusText.textContent = 'Error during fetch request.';
+            //     logOutput.textContent = `Failed to send data or receive response: ${error}`;
+            //     console.error('Fetch Error:', error);
+            // });
+            // --- End Placeholder ---
+
+            // Simulate a training process update for demonstration
+             setTimeout(() => {
+                 statusText.textContent = 'Training running... (Simulated)';
+                 logOutput.textContent += '\nData received. Preprocessing...';
+             }, 1500);
+             setTimeout(() => {
+                 logOutput.textContent += '\nPreprocessing complete. Starting model training...';
+             }, 3000);
+             setTimeout(() => {
+                 logOutput.textContent += '\nEpoch 1/5 - Loss: 0.8, Accuracy: 0.6';
+             }, 5000);
+              setTimeout(() => {
+                 logOutput.textContent += '\nEpoch 5/5 - Loss: 0.1, Accuracy: 0.95 - Training Complete!';
+                 statusText.textContent = 'Training Completed Successfully (Simulated)';
+             }, 8000);
+
+
+        });
+    </script>
+
+</body>
+</html>
